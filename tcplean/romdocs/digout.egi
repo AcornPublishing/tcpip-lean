@@ -1,0 +1,18 @@
+<html>
+<head><title>PICWEB - digital outputs</title></head>
+<body><h3>PICWEB miniature Web server</h3>
+<h4>Digital outputs</h4>
+<form action='digout.egi'>
+<table border=2><tr>
+<td><input type=submit name=out7 value=#><!--|--></td>
+<td><input type=submit name=out6 value=#><!--|--></td>
+<td><input type=submit name=out5 value=#><!--|--></td>
+<td><input type=submit name=out4 value=#><!--|--></td>
+<td><input type=submit name=out3 value=#><!--|--></td>
+<td><input type=submit name=out2 value=#><!--|--></td>
+<td><input type=submit name=out1 value=#><!--|--></td>
+<td><input type=submit name=out0 value=#><!--|--></td>
+</tr></table></form>
+<br><a href='status.egi'>Status page</a>
+<br><a href='index.htm'>Home page</a>
+</body></html>

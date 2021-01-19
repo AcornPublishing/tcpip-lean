@@ -1,0 +1,9 @@
+Software copyright (c) Iosoft Ltd. 2000. All rights reserved.
+
+This software is only licensed for distribution with the book 'TCP/IP Lean',
+and may only be used for personal experimentation by the purchaser
+of that book, on condition that this copyright notice is retained.
+For commercial licensing, contact license@iosoft.co.uk
+
+This is experimental software; use it entirely at your own risk. The author
+offers no warranties of any kind, including its fitness for purpose.

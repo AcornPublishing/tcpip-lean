@@ -1,0 +1,37 @@
+<html><meta http-equiv="refresh" content="5">
+<head><title>ChipWeb status</title></head>
+<BODY bgcolor=#d0d0ff><font face=helvetica>
+<h3><center>I/O status</center></h3>
+<b>Analog I/P</b>
+<table border=0 cellpadding=1 cellspacing=0 bgcolor=#e0e0ff>
+<tr><th colspan=5 align=center><small>Volts</small></th></tr>
+<tr align=center valign=bottom>
+<td><img src="v5_100n.gif"><br><img src="clr.gif" height=10 width=10></td>
+<td><img src="lptr.gif"><br><img src="clr.gif" height=@1 width=10></td>
+<td><img src="clr.gif" height=1 width=25></td>
+<td><img src="v5_100n.gif"><br><img src="clr.gif" height=10 width=10></td>
+<td><img src="lptr.gif"><br><img src="clr.gif" height=@2 width=10></td>
+</tr><tr>
+<td colspan=2 align=center>@3</td>
+<td>&nbsp;</td>
+<td colspan=2 align=center>@4</td>
+</tr>
+</table><br>
+<b>Digital O/P</b><br>
+<table cellpadding=6 bgcolor=#e0e0ff vspace=0>
+<tr><th align=center colspan=2><small>O/P states</small></th></tr>
+<tr>
+<td align=center>@5</td>
+<td align=center>@6</td>
+</tr>
+</table><br>
+<b>Digital I/P</b><br>
+<table cellpadding=6 bgcolor=#e0e0ff vspace=0>
+<tr><th align=center colspan=1><small>I/P state</small></th></tr>
+<tr>
+<td align=center>@7</td>
+</tr>
+</table>
+
+</body></html>
+

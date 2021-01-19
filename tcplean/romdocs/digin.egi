@@ -1,0 +1,10 @@
+<html><head><title>PICWEB - digital inputs</title></head>
+<body><h3>PICWEB miniature Web server</h3>
+<h4>Digital inputs</h4>
+<table border=2><tr><!--@?-->
+<td>#</td><td>#</td><td>#</td><td>#</td><td>#</td><td>#</td><!--| | | | | |-->
+</tr></table>
+<br><a href='digout.egi'>Digital outputs</a>
+<br><a href='status.egi'>Status page</a>
+<br><a href='index.htm'>Home page</a>
+</body></html>

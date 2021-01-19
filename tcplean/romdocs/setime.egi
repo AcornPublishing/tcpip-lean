@@ -1,0 +1,14 @@
+<html><head><title>PICWEB - set time</title></head>
+<body><h3>PICWEB miniature Web server</h3>
+<h4>Set time (HH:MM:SS)</h4>
+<form action='setime.egi'>
+<input type=text name=hrs size=2 value='@2'><!--@N--> :
+<input type=text name=min size=2 value='@1'><!--@O--> :
+<input type=text name=sec size=2 value='@0'><!--@P-->
+<br><br>
+<input type=submit name=sub value='Set clock'>
+</form>
+<br><a href='status.egi'>Status page</a>
+<br><a href='index.htm'>Home page</a>
+</body>
+</html>

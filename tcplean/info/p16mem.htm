@@ -1,0 +1,91 @@
+<!DOCTYPE HTML PUBLIC "-//SoftQuad Software//DTD HoTMetaL PRO 6.0::19990601::extensions to HTML 4.0//EN" "hmpro6.dtd">
+<HTML> 
+  <HEAD> 
+	 <TITLE>ChipWeb memory usage</TITLE> 
+  </HEAD> 
+  <BODY> 
+	 <H3>Iosoft Ltd. - ChipWeb memory usage</H3> 
+	 <H4>PIC16F877 and PCW compiler</H4> 
+	 <P>The following table gives an indication of the memory used by the
+		various ChipWeb protocols in the PIC16F877, when using the Custom Computer
+		Services PCW compiler. Due to the tight integration between the various
+		software components, and the way the compiler overlays the local variables from
+		various functions, these figures can only serve as a rough guide. Relatively
+		minor modifications to the standard code can have a significant effect on
+		memory usage, so it is strongly recommended that you perform your own tests
+		when seeking to establish whether a specific protocol will fit in the target
+		device.</P> 
+	 <P>The figures (in bytes) were obtained from the PCW compiler using the
+		standard ChipWeb software with the relevant protocols disabled; the RAM value
+		is the 'worst-case' figure. The low RAM sizes are a result of 'on-the-fly'
+		message parsing techniques, and the extensive re-use of the Ethernet buffers by
+		higher-level functions.</P> 
+	 <TABLE BORDER="1"> 
+		<TR> 
+		  <TH>Protocol</TH> 
+		  <TH>ROM</TH> 
+		  <TH> RAM</TH> 
+		</TR> 
+		<TR> 
+		  <TD>Ethernet drivers</TD> 
+		  <TD>988</TD> 
+		  <TD>134</TD> 
+		</TR> 
+		<TR> 
+		  <TD>IP</TD> 
+		  <TD>301</TD> 
+		  <TD>38</TD> 
+		</TR> 
+		<TR> 
+		  <TD>ARP</TD> 
+		  <TD>636</TD> 
+		  <TD>0</TD> 
+		</TR> 
+		<TR> 
+		  <TD>ICMP</TD> 
+		  <TD>562</TD> 
+		  <TD>2</TD> 
+		</TR> 
+		<TR> 
+		  <TD>TCP (stateless)</TD> 
+		  <TD>1159</TD> 
+		  <TD>6</TD> 
+		</TR> 
+		<TR> 
+		  <TD>HTTP</TD> 
+		  <TD>146</TD> 
+		  <TD>6</TD> 
+		</TR> 
+		<TR> 
+		  <TD>File handling</TD> 
+		  <TD>1069</TD> 
+		  <TD>28</TD> 
+		</TR> 
+		<TR> 
+		  <TD>Analog I/Ps</TD> 
+		  <TD>108</TD> 
+		  <TD>0</TD> 
+		</TR> 
+		<TR> 
+		  <TD>User interface</TD> 
+		  <TD>1505</TD> 
+		  <TD>0</TD> 
+		</TR> 
+		<TR> 
+		  <TD>LCD &amp; serial </TD> 
+		  <TD>377</TD> 
+		  <TD>0</TD> 
+		</TR> 
+		<TR> 
+		  <TD><B>TOTAL</B></TD> 
+		  <TD><B>6851</B></TD> 
+		  <TD><B>214</B></TD> 
+		</TR> 
+	 </TABLE> 
+	 <P>If SLIP drivers are used instead of Ethernet, they occupy around 1400
+		bytes of code space and 180 bytes of RAM, though there is an overall decrease
+		in code size to 5810 bytes ROM, and increase to 308 bytes RAM. Note that the
+		Ethernet and SLIP Web servers have differing functionality, so this is not a
+		strictly like-for-like comparison.</P>
+	 <P>&copy; Iosoft Ltd 2001</P> </BODY>
+</HTML>

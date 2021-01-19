@@ -1,0 +1,18 @@
+Project PING v0.18 archived 13-Aug-00 14:43
+
+ether3c.c    FA2ADE2E v0.06
+etherne.c    91C660C0 v0.25
+ip.c         1431F6E1 v0.12
+net.c        49FA2AD5 v0.10
+netutil.c    8B7C1154 v0.15
+ping.c       DCC5D3CC v0.18
+pktd.c       53069452 v0.10
+serpc.c      A8547B33 v1.10
+
+ether.h      78374607
+ip.h         7A74BD4D
+net.h        8B1221AB
+netutil.h    542554C8
+pktd.h       1004FCB4
+serpc.h      BCAE0C52
+

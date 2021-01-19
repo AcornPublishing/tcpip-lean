@@ -1,0 +1,37 @@
+<HTML>
+ <HEAD>
+  <SCRIPT language="JavaScript">
+    var vals=new Array(45,67,78,91,117,131,153,150,145,130,123,112,105,121,137,145,153,150,145,130);
+    var time=1210, incr=10;
+  </SCRIPT>
+  <TITLE>HTML graph</TITLE>
+ </HEAD>
+ <BODY BGCOLOR="#e0e0e0" TEXT="#000000">
+  <TABLE BORDER=0 CELLPADDING=0 CELLSPACING=0>
+   <TR VALIGN=BOTTOM ALIGN=CENTER >
+    <SCRIPT language="JavaScript">
+     document.write("<Td><IMG SRC=v10_200.gif></Td>");
+     for (i in vals) {
+         val = vals[i];
+         document.write("<TD WIDTH=24><IMG SRC=\"dia.gif\"><BR><IMG SRC=clr.gif WIDTH=10 HEIGHT=");
+         document.write(val);
+         document.write("></TD>\n");
+         time -= incr;
+     }
+     document.write("</TR>");
+     document.write("<TR><TD></TD><TD BGCOLOR=#000000 COLSPAN=", i+1, "><IMG SRC=\"blk.gif\" HEIGHT=1 WIDTH=30 ></TD></TR>");
+     document.write("<TR ALIGN=CENTER><TD></TD>");
+     for (i in vals) {
+        secs = time % 60;
+        mins = Math.round(time / 60);
+        document.write("<TD>");
+        if (secs==0)
+           document.write("<FONT FACE='Arial,Helvetica' SIZE=-2>", mins, ":00");
+        document.write("</TD>");
+        time += incr;
+     }
+    </SCRIPT>
+   </TR>
+  </TABLE>
+ </BODY>
+</HTML>

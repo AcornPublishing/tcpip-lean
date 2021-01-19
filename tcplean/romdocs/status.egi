@@ -1,0 +1,21 @@
+<html><meta http-equiv="refresh" content="3">
+<head><title>PICWEB</title></head>
+<body><h3>PICWEB miniature Web server</h3>
+<h4>Temperature log</h4><table border=2>
+<tr><td>Temperature</td><td><b>@3  <!--@M``-->&deg;C</b></td>
+<tr><td>Time</td><td><b>@2<!--@N-->:@1<!--@O-->:@0<!--@P--></b></td></tr>
+</tr></table>
+<h4>Digital I/O</h4><table border=2>
+<tr><td> Inputs </td><!--@?-->
+<td> </td><td> </td><td>#</td><td>#</td>
+<td>#</td><td>#</td><td>#</td><td>#</td>
+<!--| | | | | |--></tr>
+<tr><td> Outputs </td><!--@!-->
+<td>#</td><td>#</td><td>#</td><td>#</td>
+<td>#</td><td>#</td><td>#</td><td>#</td>
+<!--| | | | | | | |--></tr></table>
+<br><a href='digout.egi'>Set outputs</a>
+<br><a href='setime.egi'>Set clock</a>
+<br><a href='static.egi'>Static display</a>
+<br><a href='index.htm'>Home page</a>
+</body></html>

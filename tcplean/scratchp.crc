@@ -1,0 +1,17 @@
+Project SCRATCHP v0.29 archived 13-Aug-00 17:22
+
+ether3c.c    FA2ADE2E v0.06
+etherne.c    91C660C0 v0.25
+net.c        49FA2AD5 v0.10
+netutil.c    8B7C1154 v0.15
+pktd.c       53069452 v0.10
+scratchp.c   AAD6A9D4 v0.29
+serpc.c      A8547B33 v1.10
+
+ether.h      78374607
+net.h        8B1221AB
+netutil.h    542554C8
+pktd.h       1004FCB4
+scratchp.h   E44DD964
+serpc.h      BCAE0C52
+

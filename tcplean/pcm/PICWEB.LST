@@ -1,0 +1,7435 @@
+CCS PCM C Compiler, Version 2.693, 3951
+
+               Filename: C:\TCPLEAN\PCM\PICWEB.LST
+
+               ROM used: 5779 (71%)
+                         Largest free fragment is 2048
+               RAM used: 269 (73%) at main() level
+                         308 (84%) worst case
+               Stack:    7 worst case (5 in main + 2 for interrupts)
+
+0000:  MOVLW  08
+0001:  MOVWF  0A
+0002:  GOTO   34F
+0003:  NOP
+0004:  MOVWF  7F
+0005:  SWAPF  03,W
+0006:  BCF    03,5
+0007:  BCF    03,6
+0008:  MOVWF  21
+0009:  MOVF   0A,W
+000A:  MOVWF  20
+000B:  CLRF   0A
+000C:  MOVF   04,W
+000D:  MOVWF  22
+000E:  MOVF   77,W
+000F:  MOVWF  23
+0010:  MOVF   78,W
+0011:  MOVWF  24
+0012:  MOVF   79,W
+0013:  MOVWF  25
+0014:  MOVF   7A,W
+0015:  MOVWF  26
+0016:  MOVF   7B,W
+0017:  MOVWF  27
+0018:  BCF    03,7
+0019:  BCF    03,5
+001A:  MOVLW  8C
+001B:  MOVWF  04
+001C:  BTFSS  00,5
+001D:  GOTO   020
+001E:  BTFSC  0C,5
+001F:  GOTO   033
+0020:  MOVF   22,W
+0021:  MOVWF  04
+0022:  MOVF   23,W
+0023:  MOVWF  77
+0024:  MOVF   24,W
+0025:  MOVWF  78
+0026:  MOVF   25,W
+0027:  MOVWF  79
+0028:  MOVF   26,W
+0029:  MOVWF  7A
+002A:  MOVF   27,W
+002B:  MOVWF  7B
+002C:  MOVF   20,W
+002D:  MOVWF  0A
+002E:  SWAPF  21,W
+002F:  MOVWF  03
+0030:  SWAPF  7F,F
+0031:  SWAPF  7F,W
+0032:  RETFIE
+0033:  BCF    0A,4
+0034:  BCF    0A,3
+0035:  GOTO   0CA
+....................  /* Miniature Web server for PIC 16c76 Copyright (c) Iosoft Ltd 2000 
+.................... ** 
+.................... ** This software is only licensed for distribution with the book 'TCP/IP Lean', 
+.................... ** and may only be used for personal experimentation by the purchaser 
+.................... ** of that book, on condition that this copyright notice is retained. 
+.................... ** For commercial licensing, contact license@iosoft.co.uk 
+.................... ** 
+.................... ** This is experimental software; use it entirely at your own risk */ 
+....................  
+.................... /* Revisions: 
+.................... ** v0.01 JPB 28/2/00 
+.................... ** v0.02 - v0.27 deleted to save space 
+.................... ** v0.28 JPB 9/5/00  Added run-time variable substitution 
+.................... ** v0.29 JPB 11/5/00 Added temperature variable 
+.................... ** v0.30 JPB 11/5/00 Added time-setting capability 
+.................... ** v0.31 JPB 12/5/00 Added provision for analogue temperature sensor 
+.................... **                   Added digital O/Ps 
+.................... ** v0.32 JPB 16/5/00 Changed from 100ms to 50ms ticks 
+.................... ** v0.33 JPB 18/5/00 Removed analogue temp sensor, added PORT A digital I/Ps  
+.................... ** v0.34 JPB 4/6/00  Added PORT B invert capability 
+.................... */ 
+....................  
+.................... #define TXDROP   0          // Set to 4 to drop 1-in-4 Tx frames for test 
+.................... #define PORTBINV 0          // Set to 1 to invert port B O/Ps 
+....................  
+.................... #include <16c76.h>          // CPU definitions, must be followed by.. 
+....................  //////// Standard Header file for the PIC16C76 device //////// 
+.................... #device PIC16C76 
+.................... #list 
+.................... 
+.................... #device *=16                             // ..enable 16-bit (!) data pointers 
+.................... #FUSES HS,NOWDT,NOPROTECT,PUT,BROWNOUT   // PIC fuse settings 
+.................... #ID CHECKSUM                             // ID bytes are checksum 
+.................... #ZERO_RAM                                // Wipe RAM for safety 
+....................  
+.................... #use DELAY(CLOCK=7372800)   // CPU clock frequency 7.3728 MHz 
+.................... #use RS232 (BAUD=38400, XMIT=PIN_C6, RCV=PIN_C7, RESTART_WDT, ERRORS) 
+*
+00BB:  CLRWDT
+00BC:  BTFSS  0C,5
+00BD:  GOTO   0BB
+00BE:  MOVF   18,W
+00BF:  MOVWF  28
+00C0:  MOVF   1A,W
+00C1:  MOVWF  78
+00C2:  BTFSS  28,1
+00C3:  GOTO   0C6
+00C4:  BCF    18,4
+00C5:  BSF    18,4
+00C6:  NOP
+00C7:  BCF    0A,3
+00C8:  BCF    0A,4
+00C9:  GOTO   0CD
+.................... #bit TX_READY =      0x98.1 // Tx ready status bit 
+....................  
+.................... #define WORD unsigned long  // Data type definitions 
+.................... #define BOOL short          // 'short' is very short (1 bit) in this compiler 
+.................... typedef union               // Longword definition (not a native type) 
+.................... { 
+....................     BYTE b[4]; 
+....................     WORD w[2]; 
+....................     BYTE l; 
+.................... } LWORD; 
+....................  
+.................... #define PCOL_ICMP   1       // IP protocol values 
+.................... #define PCOL_TCP    6 
+.................... #define IPHDR_LEN   20      // IP, ICMP and TCP header lengths 
+.................... #define TCPHDR_LEN  20 
+.................... #define ICMPHDR_LEN 4       // Only include type, code & checksum in ICMP hdr 
+....................  
+.................... BYTE ipcol;                 // IP protocol byte 
+.................... LWORD local, remote;        // Local & remote IP addresses 
+.................... WORD locport, remport;      // ..and TCP port numbers 
+.................... LWORD rseq, rack;           // TCP sequence & acknowledge values 
+.................... WORD concount;              // Connection count (for high word of my seq num) 
+.................... BYTE rflags, tflags;        // Rx and Tx flags 
+.................... signed long iplen;          // Incoming IP length word 
+.................... WORD rpdlen;                // Length of user data in incoming Rx packet 
+.................... WORD tpdlen;                // Length of user data in outgoing Tx packet 
+.................... BYTE portval;               // Value of port B O/Ps 
+.................... BYTE hashmask, barmask;     // Mask values for EGI '#' and '|' variables 
+.................... BOOL inv_byte;              // Flag to 'invert' the HTML O/P for EGI vars 
+....................  
+.................... #include <ctype.h> 
+....................  ////        (C) Copyright 1996,1997 Custom Computer Services            //// 
+.................... //// This source code may only be used by licensed users of the CCS C   //// 
+.................... //// compiler.  This source code may only be distributed to other       //// 
+.................... //// licensed users of the CCS C compiler.  No other use, reproduction  //// 
+.................... //// or distribution is permitted without written permission.           //// 
+.................... //// Derivative programs created using this software in object code     //// 
+.................... //// form are not restricted in any way.                                //// 
+.................... //////////////////////////////////////////////////////////////////////////// 
+.................... #list 
+.................... 
+.................... #include "\picc\io\picslip.h"   // Include SLIP I/O functions (no linker!) 
+....................  /* SLIP I/O functions for PIC Web server Copyright (c) Iosoft Ltd 2000 
+.................... ** 
+.................... ** This software is only licensed for distribution with the book 'TCP/IP Lean',  
+.................... ** and may only be used for personal experimentation by the purchaser  
+.................... ** of that book, on condition that this copyright notice is retained.  
+.................... ** For commercial licensing, contact license@iosoft.co.uk 
+.................... ** 
+.................... ** This is experimental software; use it entirely at your own risk */ 
+....................  
+.................... /* Revisions: 
+.................... ** v0.01 JPB 30/3/00 Functions extracted from PICWEB v0.14 
+.................... */ 
+....................  
+.................... #define TXBUFFLEN  96       // Tx buffer 
+.................... #define RXBUFFLEN  80       // Rx buffer: more than enough for a 32-byte Ping 
+.................... #define RXHDR_LEN  40       // After header, data is checksummed on arrival 
+....................  
+.................... #define SLIP_END    0xc0    // SLIP escape codes 
+.................... #define SLIP_ESC    0xdb 
+.................... #define ESC_END     0xdc 
+.................... #define ESC_ESC     0xdd 
+....................  
+.................... BYTE txbuff[TXBUFFLEN];     // Transmit buffer 
+.................... int txin, txout;            // Buffer I/P and O/P counters 
+.................... WORD txi2c;                 // Count of i2c bytes to be sent 
+.................... BOOL txflag;                // Flag to start sending out Tx data 
+....................  
+.................... BYTE rxbuff[RXBUFFLEN];     // Receive buffer, I/O ptrs, and 'Rx full' flag 
+.................... int rxin, rxout, rxcount; 
+.................... BOOL rxflag; 
+.................... BOOL modemflag;             // Flag to show modem command received 
+....................  
+.................... BOOL slipend;               // Flag to mark end of I/P SLIP message 
+.................... BOOL checkflag;             // Checksum flag & byte values 
+.................... BYTE checkhi, checklo; 
+.................... BOOL rdcheckflag;           // Checksum for Rx data (excl. IP & TCP hdrs) 
+.................... BYTE rdcheckhi, rdchecklo; 
+.................... int dropcount; 
+....................  
+.................... /* Prototypes for this file */ 
+.................... int get_data(BYTE *ptr, int maxlen); 
+.................... BOOL get_byte(BYTE &b); 
+.................... BOOL get_word(WORD &w); 
+.................... BOOL get_lword(LWORD &lw); 
+.................... BOOL get_hexbyte(BYTE &val); 
+.................... void discard_data(void); 
+.................... BYTE getch_slip(void); 
+.................... BOOL match_byte(BYTE b); 
+.................... BOOL match_word(WORD w); 
+.................... BOOL match_str(char *s); 
+.................... void skip_space(void); 
+.................... BOOL skip_byte(); 
+.................... BOOL skip_word(); 
+.................... BOOL skip_lword(); 
+.................... int check_str(char *s); 
+.................... void check_byte(BYTE b); 
+.................... void check_word(WORD w); 
+.................... void check_lword(LWORD &lw); 
+.................... void check_bytes(BYTE *dat, int len); 
+.................... void put_byte(BYTE b); 
+.................... void put_str(char *s); 
+.................... void put_null(void); 
+.................... void put_word(WORD w); 
+.................... void put_nullw(void); 
+.................... void put_lword(LWORD &lw); 
+.................... void tx_start(void); 
+.................... void tx_byte(BYTE b); 
+.................... void tx_end(void); 
+.................... void check_txbytes(int n); 
+.................... BYTE read_txbuff(int &oset); 
+.................... void write_txbuff(int &oset, BYTE &b); 
+....................  
+.................... /* Get incoming data in buffer; discard any buffer overflow */ 
+.................... int get_data(BYTE *ptr, int maxlen) 
+.................... { 
+....................     BYTE b; 
+....................     int n=0; 
+....................  
+....................     while (maxlen-- > 0 && get_byte(b)) 
+....................     { 
+....................         *ptr++ = b; 
+....................         n++; 
+....................     } 
+....................     discard_data(); 
+....................     return(n); 
+.................... } 
+....................  
+.................... /* Discard incoming data */ 
+.................... void discard_data(void) 
+.................... { 
+....................     while (!slipend) 
+*
+0B4A:  BTFSC  4B,4
+0B4B:  GOTO   34E
+....................         getch_slip(); 
+0B4C:  CALL   06E
+0B4D:  GOTO   34A
+0B4E:  RETLW  00
+.................... } 
+....................  
+.................... /* Get an incoming byte value, return 0 if end of message */ 
+.................... BOOL get_byte(BYTE &b) 
+.................... { 
+....................     b = getch_slip(); 
+*
+0C92:  CALL   06E
+0C93:  MOVF   78,W
+0C94:  MOVWF  29
+*
+0E41:  CALL   06E
+0E42:  MOVF   78,W
+0E43:  BSF    03,5
+0E44:  BSF    03,6
+0E45:  MOVWF  15
+*
+0E4F:  CALL   06E
+0E50:  MOVF   78,W
+0E51:  MOVWF  40
+*
+1357:  BCF    0A,4
+1358:  BSF    0A,3
+1359:  CALL   06E
+135A:  BSF    0A,4
+135B:  BCF    0A,3
+135C:  MOVF   78,W
+135D:  BSF    03,5
+135E:  BSF    03,6
+135F:  MOVWF  27
+*
+142F:  BCF    0A,4
+1430:  BSF    0A,3
+1431:  CALL   06E
+1432:  BSF    0A,4
+1433:  BCF    0A,3
+1434:  MOVF   78,W
+1435:  BSF    03,5
+1436:  BSF    03,6
+1437:  MOVWF  27
+*
+1507:  BCF    0A,4
+1508:  BSF    0A,3
+1509:  CALL   06E
+150A:  BSF    0A,4
+150B:  BCF    0A,3
+150C:  MOVF   78,W
+150D:  BSF    03,5
+150E:  BSF    03,6
+150F:  MOVWF  27
+*
+1589:  BCF    0A,4
+158A:  BSF    0A,3
+158B:  CALL   06E
+158C:  BSF    0A,4
+158D:  BCF    0A,3
+158E:  MOVF   78,W
+158F:  BSF    03,5
+1590:  BSF    03,6
+1591:  MOVWF  1F
+*
+15BF:  BCF    0A,4
+15C0:  BSF    0A,3
+15C1:  CALL   06E
+15C2:  BSF    0A,4
+15C3:  BCF    0A,3
+15C4:  MOVF   78,W
+15C5:  BSF    03,5
+15C6:  BSF    03,6
+15C7:  MOVWF  20
+....................     return(!slipend); 
+*
+0C95:  MOVLW  00
+0C96:  BTFSS  4B,4
+0C97:  MOVLW  01
+0C98:  MOVWF  78
+*
+0E46:  MOVLW  00
+0E47:  BCF    03,5
+0E48:  BCF    03,6
+0E49:  BTFSS  4B,4
+0E4A:  MOVLW  01
+0E4B:  MOVWF  78
+*
+0E52:  MOVLW  00
+0E53:  BTFSS  4B,4
+0E54:  MOVLW  01
+0E55:  MOVWF  78
+*
+1360:  MOVLW  00
+1361:  BCF    03,5
+1362:  BCF    03,6
+1363:  BTFSS  4B,4
+1364:  MOVLW  01
+1365:  MOVWF  78
+*
+1438:  MOVLW  00
+1439:  BCF    03,5
+143A:  BCF    03,6
+143B:  BTFSS  4B,4
+143C:  MOVLW  01
+143D:  MOVWF  78
+*
+1510:  MOVLW  00
+1511:  BCF    03,5
+1512:  BCF    03,6
+1513:  BTFSS  4B,4
+1514:  MOVLW  01
+1515:  MOVWF  78
+*
+1592:  MOVLW  00
+1593:  BCF    03,5
+1594:  BCF    03,6
+1595:  BTFSS  4B,4
+1596:  MOVLW  01
+1597:  MOVWF  78
+*
+15C8:  MOVLW  00
+15C9:  BCF    03,5
+15CA:  BCF    03,6
+15CB:  BTFSS  4B,4
+15CC:  MOVLW  01
+15CD:  MOVWF  78
+.................... } 
+....................  
+.................... /* Get an incoming word value, return 0 if end of message */ 
+.................... BOOL get_word(WORD &w) 
+.................... { 
+....................     BYTE hi, lo; 
+....................  
+....................     hi = getch_slip(); 
+*
+0C54:  CALL   06E
+0C55:  MOVF   78,W
+0C56:  BSF    03,5
+0C57:  BSF    03,6
+0C58:  MOVWF  18
+*
+0DBB:  CALL   06E
+0DBC:  MOVF   78,W
+0DBD:  BSF    03,5
+0DBE:  BSF    03,6
+0DBF:  MOVWF  18
+*
+0DEB:  CALL   06E
+0DEC:  MOVF   78,W
+0DED:  BSF    03,5
+0DEE:  BSF    03,6
+0DEF:  MOVWF  18
+....................     lo = getch_slip(); 
+*
+0C59:  BCF    03,5
+0C5A:  BCF    03,6
+0C5B:  CALL   06E
+0C5C:  MOVF   78,W
+0C5D:  BSF    03,5
+0C5E:  BSF    03,6
+0C5F:  MOVWF  19
+*
+0DC0:  BCF    03,5
+0DC1:  BCF    03,6
+0DC2:  CALL   06E
+0DC3:  MOVF   78,W
+0DC4:  BSF    03,5
+0DC5:  BSF    03,6
+0DC6:  MOVWF  19
+*
+0DF0:  BCF    03,5
+0DF1:  BCF    03,6
+0DF2:  CALL   06E
+0DF3:  MOVF   78,W
+0DF4:  BSF    03,5
+0DF5:  BSF    03,6
+0DF6:  MOVWF  19
+....................     w = ((WORD)hi<<8) | (WORD)lo; 
+*
+0C60:  CLRF   1B
+0C61:  MOVF   18,W
+0C62:  MOVWF  1A
+0C63:  MOVF   1A,W
+0C64:  MOVWF  1B
+0C65:  CLRF   1A
+0C66:  BCF    03,5
+0C67:  BCF    03,6
+0C68:  CLRF   7A
+0C69:  BSF    03,5
+0C6A:  BSF    03,6
+0C6B:  MOVF   19,W
+0C6C:  BCF    03,5
+0C6D:  BCF    03,6
+0C6E:  MOVWF  77
+0C6F:  MOVF   7A,W
+0C70:  BSF    03,5
+0C71:  BSF    03,6
+0C72:  IORWF  1B,W
+0C73:  BCF    03,5
+0C74:  BCF    03,6
+0C75:  MOVWF  43
+0C76:  MOVF   77,W
+0C77:  BSF    03,5
+0C78:  BSF    03,6
+0C79:  IORWF  1A,W
+0C7A:  BCF    03,5
+0C7B:  BCF    03,6
+0C7C:  MOVWF  42
+*
+0DC7:  CLRF   1B
+0DC8:  MOVF   18,W
+0DC9:  MOVWF  1A
+0DCA:  MOVF   1A,W
+0DCB:  MOVWF  1B
+0DCC:  CLRF   1A
+0DCD:  BCF    03,5
+0DCE:  BCF    03,6
+0DCF:  CLRF   7A
+0DD0:  BSF    03,5
+0DD1:  BSF    03,6
+0DD2:  MOVF   19,W
+0DD3:  BCF    03,5
+0DD4:  BCF    03,6
+0DD5:  MOVWF  77
+0DD6:  MOVF   7A,W
+0DD7:  BSF    03,5
+0DD8:  BSF    03,6
+0DD9:  IORWF  1B,W
+0DDA:  BCF    03,5
+0DDB:  BCF    03,6
+0DDC:  MOVWF  35
+0DDD:  MOVF   77,W
+0DDE:  BSF    03,5
+0DDF:  BSF    03,6
+0DE0:  IORWF  1A,W
+0DE1:  BCF    03,5
+0DE2:  BCF    03,6
+0DE3:  MOVWF  34
+*
+0DF7:  CLRF   1B
+0DF8:  MOVF   18,W
+0DF9:  MOVWF  1A
+0DFA:  MOVF   1A,W
+0DFB:  MOVWF  1B
+0DFC:  CLRF   1A
+0DFD:  BCF    03,5
+0DFE:  BCF    03,6
+0DFF:  CLRF   7A
+0E00:  BSF    03,5
+0E01:  BSF    03,6
+0E02:  MOVF   19,W
+0E03:  BCF    03,5
+0E04:  BCF    03,6
+0E05:  MOVWF  77
+0E06:  MOVF   7A,W
+0E07:  BSF    03,5
+0E08:  BSF    03,6
+0E09:  IORWF  1B,W
+0E0A:  BCF    03,5
+0E0B:  BCF    03,6
+0E0C:  MOVWF  33
+0E0D:  MOVF   77,W
+0E0E:  BSF    03,5
+0E0F:  BSF    03,6
+0E10:  IORWF  1A,W
+0E11:  BCF    03,5
+0E12:  BCF    03,6
+0E13:  MOVWF  32
+....................     return(!slipend); 
+*
+0C7D:  MOVLW  00
+0C7E:  BTFSS  4B,4
+0C7F:  MOVLW  01
+0C80:  MOVWF  78
+*
+0DE4:  MOVLW  00
+0DE5:  BTFSS  4B,4
+0DE6:  MOVLW  01
+0DE7:  MOVWF  78
+*
+0E14:  MOVLW  00
+0E15:  BTFSS  4B,4
+0E16:  MOVLW  01
+0E17:  MOVWF  78
+.................... } 
+.................... /* Get an incoming lword value, return 0 if end of message */ 
+.................... BOOL get_lword(LWORD &lw) 
+.................... { 
+....................     lw.b[3] = getch_slip(); 
+*
+0CA0:  CALL   06E
+0CA1:  MOVF   78,W
+0CA2:  MOVWF  31
+*
+0CB3:  CALL   06E
+0CB4:  MOVF   78,W
+0CB5:  MOVWF  2D
+*
+0E1B:  CALL   06E
+0E1C:  MOVF   78,W
+0E1D:  MOVWF  39
+*
+0E2E:  CALL   06E
+0E2F:  MOVF   78,W
+0E30:  MOVWF  3D
+....................     lw.b[2] = getch_slip(); 
+*
+0CA3:  CALL   06E
+0CA4:  MOVF   78,W
+0CA5:  MOVWF  30
+*
+0CB6:  CALL   06E
+0CB7:  MOVF   78,W
+0CB8:  MOVWF  2C
+*
+0E1E:  CALL   06E
+0E1F:  MOVF   78,W
+0E20:  MOVWF  38
+*
+0E31:  CALL   06E
+0E32:  MOVF   78,W
+0E33:  MOVWF  3C
+....................     lw.b[1] = getch_slip(); 
+*
+0CA6:  CALL   06E
+0CA7:  MOVF   78,W
+0CA8:  MOVWF  2F
+*
+0CB9:  CALL   06E
+0CBA:  MOVF   78,W
+0CBB:  MOVWF  2B
+*
+0E21:  CALL   06E
+0E22:  MOVF   78,W
+0E23:  MOVWF  37
+*
+0E34:  CALL   06E
+0E35:  MOVF   78,W
+0E36:  MOVWF  3B
+....................     lw.b[0] = getch_slip(); 
+*
+0CA9:  CALL   06E
+0CAA:  MOVF   78,W
+0CAB:  MOVWF  2E
+*
+0CBC:  CALL   06E
+0CBD:  MOVF   78,W
+0CBE:  MOVWF  2A
+*
+0E24:  CALL   06E
+0E25:  MOVF   78,W
+0E26:  MOVWF  36
+*
+0E37:  CALL   06E
+0E38:  MOVF   78,W
+0E39:  MOVWF  3A
+....................     return(!slipend); 
+*
+0CAC:  MOVLW  00
+0CAD:  BTFSS  4B,4
+0CAE:  MOVLW  01
+0CAF:  MOVWF  78
+*
+0CBF:  MOVLW  00
+0CC0:  BTFSS  4B,4
+0CC1:  MOVLW  01
+0CC2:  MOVWF  78
+*
+0E27:  MOVLW  00
+0E28:  BTFSS  4B,4
+0E29:  MOVLW  01
+0E2A:  MOVWF  78
+*
+0E3A:  MOVLW  00
+0E3B:  BTFSS  4B,4
+0E3C:  MOVLW  01
+0E3D:  MOVWF  78
+.................... } 
+....................  
+.................... /* Get an incoming byte value as 1 or 2 hex characters */ 
+.................... BOOL get_hexbyte(BYTE &val) 
+.................... { 
+....................     BYTE b; 
+*
+1307:  BCF    28,0
+*
+13DF:  BCF    28,0
+*
+14B7:  BCF    28,0
+....................     BOOL ok=0; 
+....................  
+....................     val = 0; 
+*
+1308:  BCF    03,5
+1309:  BCF    03,6
+130A:  CLRF   72
+*
+13E0:  BCF    03,5
+13E1:  BCF    03,6
+13E2:  CLRF   71
+*
+14B8:  BCF    03,5
+14B9:  BCF    03,6
+14BA:  CLRF   70
+....................     while (isxdigit(rxbuff[rxout]) && get_byte(b)) 
+*
+130B:  MOVLW  A0
+130C:  ADDWF  51,W
+130D:  MOVWF  04
+130E:  BCF    03,7
+130F:  MOVF   00,W
+1310:  BSF    03,5
+1311:  BSF    03,6
+1312:  MOVWF  29
+1313:  BCF    03,5
+1314:  BCF    03,6
+1315:  MOVLW  30
+1316:  BSF    03,5
+1317:  BSF    03,6
+1318:  SUBWF  29,W
+1319:  BTFSC  03,0
+131A:  GOTO   31E
+131B:  BCF    03,5
+131C:  BCF    03,6
+131D:  GOTO   32B
+131E:  BCF    03,5
+131F:  BCF    03,6
+1320:  MOVLW  3A
+1321:  BSF    03,5
+1322:  BSF    03,6
+1323:  SUBWF  29,W
+1324:  BTFSC  03,0
+1325:  GOTO   329
+1326:  BCF    03,5
+1327:  BCF    03,6
+1328:  GOTO   357
+1329:  BCF    03,5
+132A:  BCF    03,6
+132B:  MOVLW  41
+132C:  BSF    03,5
+132D:  BSF    03,6
+132E:  SUBWF  29,W
+132F:  BTFSC  03,0
+1330:  GOTO   334
+1331:  BCF    03,5
+1332:  BCF    03,6
+1333:  GOTO   341
+1334:  BCF    03,5
+1335:  BCF    03,6
+1336:  MOVLW  47
+1337:  BSF    03,5
+1338:  BSF    03,6
+1339:  SUBWF  29,W
+133A:  BTFSC  03,0
+133B:  GOTO   33F
+133C:  BCF    03,5
+133D:  BCF    03,6
+133E:  GOTO   357
+133F:  BCF    03,5
+1340:  BCF    03,6
+1341:  MOVLW  61
+1342:  BSF    03,5
+1343:  BSF    03,6
+1344:  SUBWF  29,W
+1345:  BTFSC  03,0
+1346:  GOTO   34A
+1347:  BCF    03,5
+1348:  BCF    03,6
+1349:  GOTO   390
+134A:  BCF    03,5
+134B:  BCF    03,6
+134C:  MOVLW  67
+134D:  BSF    03,5
+134E:  BSF    03,6
+134F:  SUBWF  29,W
+1350:  BTFSS  03,0
+1351:  GOTO   355
+1352:  BCF    03,5
+1353:  BCF    03,6
+1354:  GOTO   390
+1355:  BCF    03,5
+1356:  BCF    03,6
+*
+1366:  MOVF   78,F
+1367:  BTFSC  03,2
+1368:  GOTO   390
+*
+13E3:  MOVLW  A0
+13E4:  ADDWF  51,W
+13E5:  MOVWF  04
+13E6:  BCF    03,7
+13E7:  MOVF   00,W
+13E8:  BSF    03,5
+13E9:  BSF    03,6
+13EA:  MOVWF  29
+13EB:  BCF    03,5
+13EC:  BCF    03,6
+13ED:  MOVLW  30
+13EE:  BSF    03,5
+13EF:  BSF    03,6
+13F0:  SUBWF  29,W
+13F1:  BTFSC  03,0
+13F2:  GOTO   3F6
+13F3:  BCF    03,5
+13F4:  BCF    03,6
+13F5:  GOTO   403
+13F6:  BCF    03,5
+13F7:  BCF    03,6
+13F8:  MOVLW  3A
+13F9:  BSF    03,5
+13FA:  BSF    03,6
+13FB:  SUBWF  29,W
+13FC:  BTFSC  03,0
+13FD:  GOTO   401
+13FE:  BCF    03,5
+13FF:  BCF    03,6
+1400:  GOTO   42F
+1401:  BCF    03,5
+1402:  BCF    03,6
+1403:  MOVLW  41
+1404:  BSF    03,5
+1405:  BSF    03,6
+1406:  SUBWF  29,W
+1407:  BTFSC  03,0
+1408:  GOTO   40C
+1409:  BCF    03,5
+140A:  BCF    03,6
+140B:  GOTO   419
+140C:  BCF    03,5
+140D:  BCF    03,6
+140E:  MOVLW  47
+140F:  BSF    03,5
+1410:  BSF    03,6
+1411:  SUBWF  29,W
+1412:  BTFSC  03,0
+1413:  GOTO   417
+1414:  BCF    03,5
+1415:  BCF    03,6
+1416:  GOTO   42F
+1417:  BCF    03,5
+1418:  BCF    03,6
+1419:  MOVLW  61
+141A:  BSF    03,5
+141B:  BSF    03,6
+141C:  SUBWF  29,W
+141D:  BTFSC  03,0
+141E:  GOTO   422
+141F:  BCF    03,5
+1420:  BCF    03,6
+1421:  GOTO   468
+1422:  BCF    03,5
+1423:  BCF    03,6
+1424:  MOVLW  67
+1425:  BSF    03,5
+1426:  BSF    03,6
+1427:  SUBWF  29,W
+1428:  BTFSS  03,0
+1429:  GOTO   42D
+142A:  BCF    03,5
+142B:  BCF    03,6
+142C:  GOTO   468
+142D:  BCF    03,5
+142E:  BCF    03,6
+*
+143E:  MOVF   78,F
+143F:  BTFSC  03,2
+1440:  GOTO   468
+*
+14BB:  MOVLW  A0
+14BC:  ADDWF  51,W
+14BD:  MOVWF  04
+14BE:  BCF    03,7
+14BF:  MOVF   00,W
+14C0:  BSF    03,5
+14C1:  BSF    03,6
+14C2:  MOVWF  29
+14C3:  BCF    03,5
+14C4:  BCF    03,6
+14C5:  MOVLW  30
+14C6:  BSF    03,5
+14C7:  BSF    03,6
+14C8:  SUBWF  29,W
+14C9:  BTFSC  03,0
+14CA:  GOTO   4CE
+14CB:  BCF    03,5
+14CC:  BCF    03,6
+14CD:  GOTO   4DB
+14CE:  BCF    03,5
+14CF:  BCF    03,6
+14D0:  MOVLW  3A
+14D1:  BSF    03,5
+14D2:  BSF    03,6
+14D3:  SUBWF  29,W
+14D4:  BTFSC  03,0
+14D5:  GOTO   4D9
+14D6:  BCF    03,5
+14D7:  BCF    03,6
+14D8:  GOTO   507
+14D9:  BCF    03,5
+14DA:  BCF    03,6
+14DB:  MOVLW  41
+14DC:  BSF    03,5
+14DD:  BSF    03,6
+14DE:  SUBWF  29,W
+14DF:  BTFSC  03,0
+14E0:  GOTO   4E4
+14E1:  BCF    03,5
+14E2:  BCF    03,6
+14E3:  GOTO   4F1
+14E4:  BCF    03,5
+14E5:  BCF    03,6
+14E6:  MOVLW  47
+14E7:  BSF    03,5
+14E8:  BSF    03,6
+14E9:  SUBWF  29,W
+14EA:  BTFSC  03,0
+14EB:  GOTO   4EF
+14EC:  BCF    03,5
+14ED:  BCF    03,6
+14EE:  GOTO   507
+14EF:  BCF    03,5
+14F0:  BCF    03,6
+14F1:  MOVLW  61
+14F2:  BSF    03,5
+14F3:  BSF    03,6
+14F4:  SUBWF  29,W
+14F5:  BTFSC  03,0
+14F6:  GOTO   4FA
+14F7:  BCF    03,5
+14F8:  BCF    03,6
+14F9:  GOTO   540
+14FA:  BCF    03,5
+14FB:  BCF    03,6
+14FC:  MOVLW  67
+14FD:  BSF    03,5
+14FE:  BSF    03,6
+14FF:  SUBWF  29,W
+1500:  BTFSS  03,0
+1501:  GOTO   505
+1502:  BCF    03,5
+1503:  BCF    03,6
+1504:  GOTO   540
+1505:  BCF    03,5
+1506:  BCF    03,6
+*
+1516:  MOVF   78,F
+1517:  BTFSC  03,2
+1518:  GOTO   540
+....................     { 
+....................         ok = 1; 
+*
+1369:  BSF    03,5
+136A:  BSF    03,6
+136B:  BSF    28,0
+*
+1441:  BSF    03,5
+1442:  BSF    03,6
+1443:  BSF    28,0
+*
+1519:  BSF    03,5
+151A:  BSF    03,6
+151B:  BSF    28,0
+....................         val <<= 4; 
+*
+136C:  BCF    03,5
+136D:  BCF    03,6
+136E:  SWAPF  72,F
+136F:  MOVLW  F0
+1370:  ANDWF  72,F
+*
+1444:  BCF    03,5
+1445:  BCF    03,6
+1446:  SWAPF  71,F
+1447:  MOVLW  F0
+1448:  ANDWF  71,F
+*
+151C:  BCF    03,5
+151D:  BCF    03,6
+151E:  SWAPF  70,F
+151F:  MOVLW  F0
+1520:  ANDWF  70,F
+....................         if (b <= '9') 
+*
+1371:  MOVLW  3A
+1372:  BSF    03,5
+1373:  BSF    03,6
+1374:  SUBWF  27,W
+1375:  BTFSS  03,0
+1376:  GOTO   37A
+1377:  BCF    03,5
+1378:  BCF    03,6
+1379:  GOTO   384
+137A:  BCF    03,5
+137B:  BCF    03,6
+*
+1449:  MOVLW  3A
+144A:  BSF    03,5
+144B:  BSF    03,6
+144C:  SUBWF  27,W
+144D:  BTFSS  03,0
+144E:  GOTO   452
+144F:  BCF    03,5
+1450:  BCF    03,6
+1451:  GOTO   45C
+1452:  BCF    03,5
+1453:  BCF    03,6
+*
+1521:  MOVLW  3A
+1522:  BSF    03,5
+1523:  BSF    03,6
+1524:  SUBWF  27,W
+1525:  BTFSS  03,0
+1526:  GOTO   52A
+1527:  BCF    03,5
+1528:  BCF    03,6
+1529:  GOTO   534
+152A:  BCF    03,5
+152B:  BCF    03,6
+....................             val += b - '0'; 
+*
+137C:  MOVLW  30
+137D:  BSF    03,5
+137E:  BSF    03,6
+137F:  SUBWF  27,W
+1380:  BCF    03,5
+1381:  BCF    03,6
+1382:  ADDWF  72,F
+*
+1454:  MOVLW  30
+1455:  BSF    03,5
+1456:  BSF    03,6
+1457:  SUBWF  27,W
+1458:  BCF    03,5
+1459:  BCF    03,6
+145A:  ADDWF  71,F
+*
+152C:  MOVLW  30
+152D:  BSF    03,5
+152E:  BSF    03,6
+152F:  SUBWF  27,W
+1530:  BCF    03,5
+1531:  BCF    03,6
+1532:  ADDWF  70,F
+....................         else 
+*
+1383:  GOTO   38F
+*
+145B:  GOTO   467
+*
+1533:  GOTO   53F
+....................             val += (b-'A'+10) & 0xf; 
+*
+1384:  MOVLW  41
+1385:  BSF    03,5
+1386:  BSF    03,6
+1387:  SUBWF  27,W
+1388:  BCF    03,5
+1389:  BCF    03,6
+138A:  MOVWF  77
+138B:  MOVLW  0A
+138C:  ADDWF  77,W
+138D:  ANDLW  0F
+138E:  ADDWF  72,F
+*
+145C:  MOVLW  41
+145D:  BSF    03,5
+145E:  BSF    03,6
+145F:  SUBWF  27,W
+1460:  BCF    03,5
+1461:  BCF    03,6
+1462:  MOVWF  77
+1463:  MOVLW  0A
+1464:  ADDWF  77,W
+1465:  ANDLW  0F
+1466:  ADDWF  71,F
+*
+1534:  MOVLW  41
+1535:  BSF    03,5
+1536:  BSF    03,6
+1537:  SUBWF  27,W
+1538:  BCF    03,5
+1539:  BCF    03,6
+153A:  MOVWF  77
+153B:  MOVLW  0A
+153C:  ADDWF  77,W
+153D:  ANDLW  0F
+153E:  ADDWF  70,F
+....................     } 
+*
+138F:  GOTO   30B
+*
+1467:  GOTO   3E3
+*
+153F:  GOTO   4BB
+....................     return(ok); 
+*
+1390:  MOVLW  00
+1391:  BSF    03,5
+1392:  BSF    03,6
+1393:  BTFSC  28,0
+1394:  MOVLW  01
+1395:  BCF    03,5
+1396:  BCF    03,6
+1397:  MOVWF  78
+*
+1468:  MOVLW  00
+1469:  BSF    03,5
+146A:  BSF    03,6
+146B:  BTFSC  28,0
+146C:  MOVLW  01
+146D:  BCF    03,5
+146E:  BCF    03,6
+146F:  MOVWF  78
+*
+1540:  MOVLW  00
+1541:  BSF    03,5
+1542:  BSF    03,6
+1543:  BTFSC  28,0
+1544:  MOVLW  01
+1545:  BCF    03,5
+1546:  BCF    03,6
+1547:  MOVWF  78
+.................... } 
+....................  
+.................... /* Get a SLIP byte from buffer; if end, set flag */ 
+.................... BYTE getch_slip(void) 
+.................... { 
+*
+086E:  BSF    03,5
+086F:  BSF    03,6
+0870:  CLRF   2C
+....................     BYTE b=0; 
+....................  
+....................     slipend = rxout>=rxcount; 
+0871:  BCF    03,5
+0872:  BCF    03,6
+0873:  MOVF   51,W
+0874:  SUBWF  52,W
+0875:  BTFSC  03,2
+0876:  GOTO   07B
+0877:  BTFSS  03,0
+0878:  GOTO   07B
+0879:  BCF    4B,4
+087A:  GOTO   07C
+087B:  BSF    4B,4
+....................     if (!slipend) 
+087C:  BTFSC  4B,4
+087D:  GOTO   08E
+....................     { 
+....................         b = rxbuff[rxout++]; 
+087E:  MOVF   51,W
+087F:  INCF   51,F
+0880:  MOVWF  77
+0881:  MOVLW  A0
+0882:  ADDWF  77,W
+0883:  MOVWF  04
+0884:  BCF    03,7
+0885:  MOVF   00,W
+0886:  BSF    03,5
+0887:  BSF    03,6
+0888:  MOVWF  2C
+....................         check_byte(b); 
+0889:  MOVF   2C,W
+088A:  MOVWF  2D
+088B:  BCF    03,5
+088C:  BCF    03,6
+088D:  CALL   046
+....................     } 
+....................     return(b); 
+088E:  BSF    03,5
+088F:  BSF    03,6
+0890:  MOVF   2C,W
+0891:  BCF    03,5
+0892:  BCF    03,6
+0893:  MOVWF  78
+0894:  RETLW  00
+.................... } 
+....................  
+.................... /* Match an incoming byte value, return 0 not matched, or end of message */ 
+.................... BOOL match_byte(BYTE b) 
+.................... { 
+....................     return(b==getch_slip() && !slipend); 
+0895:  CALL   06E
+0896:  MOVF   78,W
+0897:  BSF    03,5
+0898:  BSF    03,6
+0899:  SUBWF  2B,W
+089A:  BTFSC  03,2
+089B:  GOTO   09F
+089C:  BCF    03,5
+089D:  BCF    03,6
+089E:  GOTO   0A3
+089F:  BCF    03,5
+08A0:  BCF    03,6
+08A1:  BTFSS  4B,4
+08A2:  GOTO   0A5
+08A3:  MOVLW  00
+08A4:  GOTO   0A6
+08A5:  MOVLW  01
+08A6:  MOVWF  78
+08A7:  RETLW  00
+.................... } 
+.................... /* Match an incoming byte value, return 0 not matched, or end of message */ 
+.................... BOOL match_word(WORD w) 
+.................... { 
+....................     WORD inw; 
+....................  
+....................     return(get_word(inw) && inw==w); 
+.................... } 
+.................... /* Match a string value, return 0 (and don't move O/P ptr) if not matched */ 
+.................... BOOL match_str(char *s) 
+.................... { 
+....................     BOOL ok=1; 
+*
+0AEA:  BSF    03,5
+0AEB:  BSF    03,6
+0AEC:  BSF    28,0
+....................     int rxo; 
+....................  
+....................     rxo = rxout; 
+0AED:  BCF    03,5
+0AEE:  BCF    03,6
+0AEF:  MOVF   51,W
+0AF0:  BSF    03,5
+0AF1:  BSF    03,6
+0AF2:  MOVWF  29
+0AF3:  BCF    03,5
+0AF4:  BCF    03,6
+....................     while (ok && *s) 
+0AF5:  BSF    03,5
+0AF6:  BSF    03,6
+0AF7:  BTFSC  28,0
+0AF8:  GOTO   2FC
+0AF9:  BCF    03,5
+0AFA:  BCF    03,6
+0AFB:  GOTO   33A
+0AFC:  BCF    03,5
+0AFD:  BCF    03,6
+0AFE:  BSF    03,5
+0AFF:  BSF    03,6
+0B00:  MOVF   27,W
+0B01:  BCF    03,5
+0B02:  BCF    03,6
+0B03:  MOVWF  7A
+0B04:  BSF    03,5
+0B05:  BSF    03,6
+0B06:  MOVF   26,W
+0B07:  MOVWF  04
+0B08:  BCF    03,7
+0B09:  BCF    03,5
+0B0A:  BCF    03,6
+0B0B:  BTFSC  7A,0
+0B0C:  BSF    03,7
+0B0D:  MOVF   00,F
+0B0E:  BTFSC  03,2
+0B0F:  GOTO   33A
+....................         ok = match_byte(*s++); 
+0B10:  BSF    03,5
+0B11:  BSF    03,6
+0B12:  MOVF   27,W
+0B13:  BCF    03,5
+0B14:  BCF    03,6
+0B15:  MOVWF  7A
+0B16:  BSF    03,5
+0B17:  BSF    03,6
+0B18:  MOVF   26,W
+0B19:  INCF   26,F
+0B1A:  BTFSC  03,2
+0B1B:  INCF   27,F
+0B1C:  MOVWF  04
+0B1D:  BCF    03,7
+0B1E:  BCF    03,5
+0B1F:  BCF    03,6
+0B20:  BTFSC  7A,0
+0B21:  BSF    03,7
+0B22:  MOVF   00,W
+0B23:  BSF    03,5
+0B24:  BSF    03,6
+0B25:  MOVWF  2A
+0B26:  MOVF   2A,W
+0B27:  MOVWF  2B
+0B28:  BCF    03,5
+0B29:  BCF    03,6
+0B2A:  CALL   095
+0B2B:  MOVF   78,F
+0B2C:  BTFSS  03,2
+0B2D:  GOTO   334
+0B2E:  BSF    03,5
+0B2F:  BSF    03,6
+0B30:  BCF    28,0
+0B31:  BCF    03,5
+0B32:  BCF    03,6
+0B33:  GOTO   339
+0B34:  BSF    03,5
+0B35:  BSF    03,6
+0B36:  BSF    28,0
+0B37:  BCF    03,5
+0B38:  BCF    03,6
+0B39:  GOTO   2F5
+....................     if (!ok) 
+0B3A:  BSF    03,5
+0B3B:  BSF    03,6
+0B3C:  BTFSS  28,0
+0B3D:  GOTO   341
+0B3E:  BCF    03,5
+0B3F:  BCF    03,6
+0B40:  GOTO   349
+0B41:  BCF    03,5
+0B42:  BCF    03,6
+....................         rxout = rxo; 
+0B43:  BSF    03,5
+0B44:  BSF    03,6
+0B45:  MOVF   29,W
+0B46:  BCF    03,5
+0B47:  BCF    03,6
+0B48:  MOVWF  51
+0B49:  RETLW  00
+.................... } 
+....................  
+.................... /* Skip whitespace & ctrl chars in incoming data */ 
+.................... void skip_space(void) 
+.................... { 
+....................     while (rxbuff[rxout] <= ' ') 
+*
+1196:  MOVLW  A0
+1197:  ADDWF  51,W
+1198:  MOVWF  04
+1199:  BCF    03,7
+119A:  MOVLW  21
+119B:  SUBWF  00,W
+119C:  BTFSC  03,0
+119D:  GOTO   1A4
+....................         getch_slip(); 
+119E:  BCF    0A,4
+119F:  BSF    0A,3
+11A0:  CALL   06E
+11A1:  BSF    0A,4
+11A2:  BCF    0A,3
+11A3:  GOTO   196
+.................... } 
+.................... /* Skip an incoming byte value, return 0 if end of message */ 
+.................... BOOL skip_byte() 
+.................... { 
+....................     getch_slip(); 
+*
+07EB:  BSF    0A,3
+07EC:  CALL   06E
+07ED:  BCF    0A,3
+....................     return(!slipend); 
+07EE:  MOVLW  00
+07EF:  BTFSS  4B,4
+07F0:  MOVLW  01
+07F1:  MOVWF  78
+07F2:  RETLW  00
+.................... } 
+.................... /* Skip an incoming byte value, return 0 if end of message */ 
+.................... BOOL skip_word() 
+.................... { 
+....................     getch_slip(); 
+*
+08A8:  CALL   06E
+....................     getch_slip(); 
+08A9:  CALL   06E
+....................     return(!slipend); 
+08AA:  MOVLW  00
+08AB:  BTFSS  4B,4
+08AC:  MOVLW  01
+08AD:  MOVWF  78
+08AE:  RETLW  00
+.................... } 
+.................... /* Skip an incoming byte value, return 0 if end of message */ 
+.................... BOOL skip_lword() 
+.................... { 
+....................     getch_slip(); 
+*
+0E5D:  CALL   06E
+....................     getch_slip(); 
+0E5E:  CALL   06E
+....................     getch_slip(); 
+0E5F:  CALL   06E
+....................     getch_slip(); 
+0E60:  CALL   06E
+....................     return(!slipend); 
+0E61:  MOVLW  00
+0E62:  BTFSS  4B,4
+0E63:  MOVLW  01
+0E64:  MOVWF  78
+.................... } 
+....................  
+.................... /* Compute checksum of a string, return its length */ 
+.................... int check_str(char *s) 
+.................... { 
+....................     char c; 
+....................     int n=0; 
+....................  
+....................     while ((c = s[n])!=0) 
+....................     { 
+....................         check_byte(c); 
+....................         n++; 
+....................     } 
+....................     return(n); 
+.................... } 
+....................  
+.................... /* Add byte to checksum value */ 
+.................... void check_byte(BYTE b) 
+.................... { 
+....................     if (checkflag) 
+*
+0846:  BTFSS  4B,5
+0847:  GOTO   05A
+....................     { 
+....................         if ((checklo = b+checklo) < b) 
+0848:  BSF    03,5
+0849:  BSF    03,6
+084A:  MOVF   2D,W
+084B:  BCF    03,5
+084C:  BCF    03,6
+084D:  ADDWF  54,F
+084E:  BSF    03,5
+084F:  BSF    03,6
+0850:  MOVF   2D,W
+0851:  BCF    03,5
+0852:  BCF    03,6
+0853:  SUBWF  54,W
+0854:  BTFSC  03,0
+0855:  GOTO   059
+....................         { 
+....................             if (++checkhi == 0) 
+0856:  INCFSZ 53,F
+0857:  GOTO   059
+....................                 checklo++; 
+0858:  INCF   54,F
+....................         } 
+....................     } 
+....................     else 
+0859:  GOTO   06B
+....................     { 
+....................         if ((checkhi = b+checkhi) < b) 
+085A:  BSF    03,5
+085B:  BSF    03,6
+085C:  MOVF   2D,W
+085D:  BCF    03,5
+085E:  BCF    03,6
+085F:  ADDWF  53,F
+0860:  BSF    03,5
+0861:  BSF    03,6
+0862:  MOVF   2D,W
+0863:  BCF    03,5
+0864:  BCF    03,6
+0865:  SUBWF  53,W
+0866:  BTFSC  03,0
+0867:  GOTO   06B
+....................         { 
+....................             if (++checklo == 0) 
+0868:  INCFSZ 54,F
+0869:  GOTO   06B
+....................                 checkhi++; 
+086A:  INCF   53,F
+....................         } 
+....................     } 
+....................     checkflag = !checkflag; 
+086B:  MOVLW  20
+086C:  XORWF  4B,F
+086D:  RETLW  00
+.................... } 
+.................... /* Add word to checksum value */ 
+.................... void check_word(WORD w) 
+.................... { 
+....................     check_byte(w>>8); 
+....................     check_byte(w); 
+.................... } 
+.................... /* Add longword to checksum value */ 
+.................... void check_lword(LWORD &lw) 
+.................... { 
+....................     check_byte(lw.b[3]); 
+*
+091F:  MOVF   2D,W
+0920:  BSF    03,5
+0921:  BSF    03,6
+0922:  MOVWF  2D
+0923:  BCF    03,5
+0924:  BCF    03,6
+0925:  CALL   046
+*
+093B:  MOVF   31,W
+093C:  BSF    03,5
+093D:  BSF    03,6
+093E:  MOVWF  2D
+093F:  BCF    03,5
+0940:  BCF    03,6
+0941:  CALL   046
+*
+0A6A:  MOVF   2D,W
+0A6B:  BSF    03,5
+0A6C:  BSF    03,6
+0A6D:  MOVWF  2D
+0A6E:  BCF    03,5
+0A6F:  BCF    03,6
+0A70:  CALL   046
+*
+0A86:  MOVF   31,W
+0A87:  BSF    03,5
+0A88:  BSF    03,6
+0A89:  MOVWF  2D
+0A8A:  BCF    03,5
+0A8B:  BCF    03,6
+0A8C:  CALL   046
+*
+0E7F:  MOVF   2D,W
+0E80:  BSF    03,5
+0E81:  BSF    03,6
+0E82:  MOVWF  2D
+0E83:  BCF    03,5
+0E84:  BCF    03,6
+0E85:  CALL   046
+*
+0E9B:  MOVF   31,W
+0E9C:  BSF    03,5
+0E9D:  BSF    03,6
+0E9E:  MOVWF  2D
+0E9F:  BCF    03,5
+0EA0:  BCF    03,6
+0EA1:  CALL   046
+....................     check_byte(lw.b[2]); 
+*
+0926:  MOVF   2C,W
+0927:  BSF    03,5
+0928:  BSF    03,6
+0929:  MOVWF  2D
+092A:  BCF    03,5
+092B:  BCF    03,6
+092C:  CALL   046
+*
+0942:  MOVF   30,W
+0943:  BSF    03,5
+0944:  BSF    03,6
+0945:  MOVWF  2D
+0946:  BCF    03,5
+0947:  BCF    03,6
+0948:  CALL   046
+*
+0A71:  MOVF   2C,W
+0A72:  BSF    03,5
+0A73:  BSF    03,6
+0A74:  MOVWF  2D
+0A75:  BCF    03,5
+0A76:  BCF    03,6
+0A77:  CALL   046
+*
+0A8D:  MOVF   30,W
+0A8E:  BSF    03,5
+0A8F:  BSF    03,6
+0A90:  MOVWF  2D
+0A91:  BCF    03,5
+0A92:  BCF    03,6
+0A93:  CALL   046
+*
+0E86:  MOVF   2C,W
+0E87:  BSF    03,5
+0E88:  BSF    03,6
+0E89:  MOVWF  2D
+0E8A:  BCF    03,5
+0E8B:  BCF    03,6
+0E8C:  CALL   046
+*
+0EA2:  MOVF   30,W
+0EA3:  BSF    03,5
+0EA4:  BSF    03,6
+0EA5:  MOVWF  2D
+0EA6:  BCF    03,5
+0EA7:  BCF    03,6
+0EA8:  CALL   046
+....................     check_byte(lw.b[1]); 
+*
+092D:  MOVF   2B,W
+092E:  BSF    03,5
+092F:  BSF    03,6
+0930:  MOVWF  2D
+0931:  BCF    03,5
+0932:  BCF    03,6
+0933:  CALL   046
+*
+0949:  MOVF   2F,W
+094A:  BSF    03,5
+094B:  BSF    03,6
+094C:  MOVWF  2D
+094D:  BCF    03,5
+094E:  BCF    03,6
+094F:  CALL   046
+*
+0A78:  MOVF   2B,W
+0A79:  BSF    03,5
+0A7A:  BSF    03,6
+0A7B:  MOVWF  2D
+0A7C:  BCF    03,5
+0A7D:  BCF    03,6
+0A7E:  CALL   046
+*
+0A94:  MOVF   2F,W
+0A95:  BSF    03,5
+0A96:  BSF    03,6
+0A97:  MOVWF  2D
+0A98:  BCF    03,5
+0A99:  BCF    03,6
+0A9A:  CALL   046
+*
+0E8D:  MOVF   2B,W
+0E8E:  BSF    03,5
+0E8F:  BSF    03,6
+0E90:  MOVWF  2D
+0E91:  BCF    03,5
+0E92:  BCF    03,6
+0E93:  CALL   046
+*
+0EA9:  MOVF   2F,W
+0EAA:  BSF    03,5
+0EAB:  BSF    03,6
+0EAC:  MOVWF  2D
+0EAD:  BCF    03,5
+0EAE:  BCF    03,6
+0EAF:  CALL   046
+....................     check_byte(lw.b[0]); 
+*
+0934:  MOVF   2A,W
+0935:  BSF    03,5
+0936:  BSF    03,6
+0937:  MOVWF  2D
+0938:  BCF    03,5
+0939:  BCF    03,6
+093A:  CALL   046
+*
+0950:  MOVF   2E,W
+0951:  BSF    03,5
+0952:  BSF    03,6
+0953:  MOVWF  2D
+0954:  BCF    03,5
+0955:  BCF    03,6
+0956:  CALL   046
+*
+0A7F:  MOVF   2A,W
+0A80:  BSF    03,5
+0A81:  BSF    03,6
+0A82:  MOVWF  2D
+0A83:  BCF    03,5
+0A84:  BCF    03,6
+0A85:  CALL   046
+*
+0A9B:  MOVF   2E,W
+0A9C:  BSF    03,5
+0A9D:  BSF    03,6
+0A9E:  MOVWF  2D
+0A9F:  BCF    03,5
+0AA0:  BCF    03,6
+0AA1:  CALL   046
+*
+0E94:  MOVF   2A,W
+0E95:  BSF    03,5
+0E96:  BSF    03,6
+0E97:  MOVWF  2D
+0E98:  BCF    03,5
+0E99:  BCF    03,6
+0E9A:  CALL   046
+*
+0EB0:  MOVF   2E,W
+0EB1:  BSF    03,5
+0EB2:  BSF    03,6
+0EB3:  MOVWF  2D
+0EB4:  BCF    03,5
+0EB5:  BCF    03,6
+0EB6:  CALL   046
+.................... } 
+....................  
+.................... /* Add array of bytes to checksum value */ 
+.................... void check_bytes(BYTE *dat, int len) 
+.................... { 
+....................     while (len--) 
+*
+0D46:  BSF    03,5
+0D47:  BSF    03,6
+0D48:  MOVF   18,W
+0D49:  DECF   18,F
+0D4A:  IORLW  00
+0D4B:  BTFSS  03,2
+0D4C:  GOTO   550
+0D4D:  BCF    03,5
+0D4E:  BCF    03,6
+0D4F:  GOTO   56E
+0D50:  BCF    03,5
+0D51:  BCF    03,6
+....................         check_byte(*dat++); 
+0D52:  BSF    03,5
+0D53:  BSF    03,6
+0D54:  MOVF   17,W
+0D55:  BCF    03,5
+0D56:  BCF    03,6
+0D57:  MOVWF  7A
+0D58:  BSF    03,5
+0D59:  BSF    03,6
+0D5A:  MOVF   16,W
+0D5B:  INCF   16,F
+0D5C:  BTFSC  03,2
+0D5D:  INCF   17,F
+0D5E:  MOVWF  04
+0D5F:  BCF    03,7
+0D60:  BCF    03,5
+0D61:  BCF    03,6
+0D62:  BTFSC  7A,0
+0D63:  BSF    03,7
+0D64:  MOVF   00,W
+0D65:  BSF    03,5
+0D66:  BSF    03,6
+0D67:  MOVWF  19
+0D68:  MOVF   19,W
+0D69:  MOVWF  2D
+0D6A:  BCF    03,5
+0D6B:  BCF    03,6
+0D6C:  CALL   046
+0D6D:  GOTO   546
+.................... } 
+....................  
+.................... /* Start a transmission */ 
+.................... void tx_start(void) 
+.................... { 
+....................     putchar(SLIP_END); 
+*
+08DF:  MOVLW  C0
+08E0:  CLRWDT
+08E1:  BTFSS  0C,4
+08E2:  GOTO   0E0
+08E3:  MOVWF  19
+.................... } 
+....................  
+.................... /* Encode and transmit a single SLIP byte */ 
+.................... void tx_byte(BYTE b) 
+.................... { 
+....................     if (b==SLIP_END || b==SLIP_ESC) 
+*
+0308:  MOVLW  C0
+0309:  BSF    03,5
+030A:  BSF    03,6
+030B:  SUBWF  19,W
+030C:  BTFSS  03,2
+030D:  GOTO   311
+030E:  BCF    03,5
+030F:  BCF    03,6
+0310:  GOTO   31E
+0311:  BCF    03,5
+0312:  BCF    03,6
+0313:  MOVLW  DB
+0314:  BSF    03,5
+0315:  BSF    03,6
+0316:  SUBWF  19,W
+0317:  BTFSC  03,2
+0318:  GOTO   31C
+0319:  BCF    03,5
+031A:  BCF    03,6
+031B:  GOTO   33C
+031C:  BCF    03,5
+031D:  BCF    03,6
+....................     { 
+....................         putchar(SLIP_ESC); 
+031E:  MOVLW  DB
+031F:  CLRWDT
+0320:  BTFSS  0C,4
+0321:  GOTO   31F
+0322:  MOVWF  19
+....................         putchar(b==SLIP_END ? ESC_END : ESC_ESC); 
+0323:  MOVLW  C0
+0324:  BSF    03,5
+0325:  BSF    03,6
+0326:  SUBWF  19,W
+0327:  BTFSC  03,2
+0328:  GOTO   32C
+0329:  BCF    03,5
+032A:  BCF    03,6
+032B:  GOTO   330
+032C:  BCF    03,5
+032D:  BCF    03,6
+032E:  MOVLW  DC
+032F:  GOTO   331
+0330:  MOVLW  DD
+0331:  BSF    03,5
+0332:  BSF    03,6
+0333:  MOVWF  1A
+0334:  MOVF   1A,W
+0335:  BCF    03,5
+0336:  BCF    03,6
+0337:  CLRWDT
+0338:  BTFSS  0C,4
+0339:  GOTO   337
+033A:  MOVWF  19
+....................     } 
+....................     else 
+033B:  GOTO   345
+....................         putchar(b); 
+033C:  BSF    03,5
+033D:  BSF    03,6
+033E:  MOVF   19,W
+033F:  BCF    03,5
+0340:  BCF    03,6
+0341:  CLRWDT
+0342:  BTFSS  0C,4
+0343:  GOTO   341
+0344:  MOVWF  19
+0345:  RETLW  00
+.................... } 
+....................  
+.................... /* End a transmission, start sending it out */ 
+.................... void tx_end(void) 
+.................... { 
+....................     txflag = 1; 
+*
+09A4:  BSF    4B,1
+09A5:  RETLW  00
+.................... } 
+....................  
+.................... /* Send a byte out to the SLIP link, then add to checksum */ 
+.................... void put_byte(BYTE b) 
+.................... { 
+....................     if (txin < TXBUFFLEN) 
+*
+08AF:  MOVLW  60
+08B0:  SUBWF  4C,W
+08B1:  BTFSC  03,0
+08B2:  GOTO   0C6
+....................     { 
+....................         write_txbuff(txin, b); 
+....................         txin++; 
+*
+08C5:  INCF   4C,F
+....................     } 
+....................     check_byte(b); 
+08C6:  BSF    03,5
+08C7:  BSF    03,6
+08C8:  MOVF   26,W
+08C9:  MOVWF  2D
+08CA:  BCF    03,5
+08CB:  BCF    03,6
+08CC:  CALL   046
+08CD:  RETLW  00
+.................... } 
+....................  
+.................... /* Send a string out to the SLIP link, add to checksum */ 
+.................... void put_str(char *s) 
+.................... { 
+....................     while (*s) 
+....................         put_byte(*s++); 
+.................... } 
+....................  
+.................... /* Send a null out to the SLIP link */ 
+.................... void put_null(void) 
+.................... { 
+....................     put_byte(0); 
+*
+07F3:  BSF    03,5
+07F4:  BSF    03,6
+07F5:  CLRF   26
+07F6:  BCF    03,5
+07F7:  BCF    03,6
+07F8:  BSF    0A,3
+07F9:  CALL   0AF
+07FA:  BCF    0A,3
+07FB:  RETLW  00
+.................... } 
+....................  
+.................... /* Send a word out to the SLIP link, then add to checksum */ 
+.................... void put_word(WORD w) 
+.................... { 
+....................     put_byte(w >> 8); 
+*
+09E9:  BSF    03,5
+09EA:  BSF    03,6
+09EB:  MOVF   21,W
+09EC:  MOVWF  22
+09ED:  CLRF   23
+09EE:  MOVF   22,W
+09EF:  MOVWF  26
+09F0:  BCF    03,5
+09F1:  BCF    03,6
+09F2:  CALL   0AF
+....................     put_byte(w); 
+09F3:  BSF    03,5
+09F4:  BSF    03,6
+09F5:  MOVF   20,W
+09F6:  MOVWF  26
+09F7:  BCF    03,5
+09F8:  BCF    03,6
+09F9:  CALL   0AF
+09FA:  RETLW  00
+.................... } 
+....................  
+.................... /* Send a null word out to the SLIP link */ 
+.................... void put_nullw(void) 
+.................... { 
+....................     put_byte(0); 
+*
+08CE:  BSF    03,5
+08CF:  BSF    03,6
+08D0:  CLRF   26
+08D1:  BCF    03,5
+08D2:  BCF    03,6
+08D3:  CALL   0AF
+....................     put_byte(0); 
+08D4:  BSF    03,5
+08D5:  BSF    03,6
+08D6:  CLRF   26
+08D7:  BCF    03,5
+08D8:  BCF    03,6
+08D9:  CALL   0AF
+08DA:  RETLW  00
+.................... } 
+....................  
+.................... void put_lword(LWORD &lw) 
+.................... { 
+....................     put_byte(lw.b[3]); 
+*
+096B:  MOVF   2D,W
+096C:  BSF    03,5
+096D:  BSF    03,6
+096E:  MOVWF  26
+096F:  BCF    03,5
+0970:  BCF    03,6
+0971:  CALL   0AF
+*
+0987:  MOVF   31,W
+0988:  BSF    03,5
+0989:  BSF    03,6
+098A:  MOVWF  26
+098B:  BCF    03,5
+098C:  BCF    03,6
+098D:  CALL   0AF
+*
+0A16:  MOVF   3D,W
+0A17:  BSF    03,5
+0A18:  BSF    03,6
+0A19:  MOVWF  26
+0A1A:  BCF    03,5
+0A1B:  BCF    03,6
+0A1C:  CALL   0AF
+*
+0A32:  MOVF   39,W
+0A33:  BSF    03,5
+0A34:  BSF    03,6
+0A35:  MOVWF  26
+0A36:  BCF    03,5
+0A37:  BCF    03,6
+0A38:  CALL   0AF
+....................     put_byte(lw.b[2]); 
+*
+0972:  MOVF   2C,W
+0973:  BSF    03,5
+0974:  BSF    03,6
+0975:  MOVWF  26
+0976:  BCF    03,5
+0977:  BCF    03,6
+0978:  CALL   0AF
+*
+098E:  MOVF   30,W
+098F:  BSF    03,5
+0990:  BSF    03,6
+0991:  MOVWF  26
+0992:  BCF    03,5
+0993:  BCF    03,6
+0994:  CALL   0AF
+*
+0A1D:  MOVF   3C,W
+0A1E:  BSF    03,5
+0A1F:  BSF    03,6
+0A20:  MOVWF  26
+0A21:  BCF    03,5
+0A22:  BCF    03,6
+0A23:  CALL   0AF
+*
+0A39:  MOVF   38,W
+0A3A:  BSF    03,5
+0A3B:  BSF    03,6
+0A3C:  MOVWF  26
+0A3D:  BCF    03,5
+0A3E:  BCF    03,6
+0A3F:  CALL   0AF
+....................     put_byte(lw.b[1]); 
+*
+0979:  MOVF   2B,W
+097A:  BSF    03,5
+097B:  BSF    03,6
+097C:  MOVWF  26
+097D:  BCF    03,5
+097E:  BCF    03,6
+097F:  CALL   0AF
+*
+0995:  MOVF   2F,W
+0996:  BSF    03,5
+0997:  BSF    03,6
+0998:  MOVWF  26
+0999:  BCF    03,5
+099A:  BCF    03,6
+099B:  CALL   0AF
+*
+0A24:  MOVF   3B,W
+0A25:  BSF    03,5
+0A26:  BSF    03,6
+0A27:  MOVWF  26
+0A28:  BCF    03,5
+0A29:  BCF    03,6
+0A2A:  CALL   0AF
+*
+0A40:  MOVF   37,W
+0A41:  BSF    03,5
+0A42:  BSF    03,6
+0A43:  MOVWF  26
+0A44:  BCF    03,5
+0A45:  BCF    03,6
+0A46:  CALL   0AF
+....................     put_byte(lw.b[0]); 
+*
+0980:  MOVF   2A,W
+0981:  BSF    03,5
+0982:  BSF    03,6
+0983:  MOVWF  26
+0984:  BCF    03,5
+0985:  BCF    03,6
+0986:  CALL   0AF
+*
+099C:  MOVF   2E,W
+099D:  BSF    03,5
+099E:  BSF    03,6
+099F:  MOVWF  26
+09A0:  BCF    03,5
+09A1:  BCF    03,6
+09A2:  CALL   0AF
+*
+0A2B:  MOVF   3A,W
+0A2C:  BSF    03,5
+0A2D:  BSF    03,6
+0A2E:  MOVWF  26
+0A2F:  BCF    03,5
+0A30:  BCF    03,6
+0A31:  CALL   0AF
+*
+0A47:  MOVF   36,W
+0A48:  BSF    03,5
+0A49:  BSF    03,6
+0A4A:  MOVWF  26
+0A4B:  BCF    03,5
+0A4C:  BCF    03,6
+0A4D:  CALL   0AF
+.................... } 
+....................  
+.................... /* Compute checksum of Tx bytes, given count */ 
+.................... void check_txbytes(int n) 
+.................... { 
+....................     while (n--) 
+*
+16C6:  BSF    03,5
+16C7:  BSF    03,6
+16C8:  MOVF   1E,W
+16C9:  DECF   1E,F
+16CA:  IORLW  00
+16CB:  BTFSS  03,2
+16CC:  GOTO   6D0
+16CD:  BCF    03,5
+16CE:  BCF    03,6
+16CF:  GOTO   6EF
+16D0:  BCF    03,5
+16D1:  BCF    03,6
+....................     { 
+....................         check_byte(read_txbuff(txin)); 
+*
+16E0:  MOVF   78,W
+16E1:  BSF    03,5
+16E2:  BSF    03,6
+16E3:  MOVWF  1F
+16E4:  MOVF   1F,W
+16E5:  MOVWF  2D
+16E6:  BCF    03,5
+16E7:  BCF    03,6
+16E8:  BCF    0A,4
+16E9:  BSF    0A,3
+16EA:  CALL   046
+16EB:  BSF    0A,4
+16EC:  BCF    0A,3
+....................         txin++; 
+16ED:  INCF   4C,F
+....................     } 
+16EE:  GOTO   6C6
+.................... } 
+....................  
+.................... /* Read a byte from the Tx buffer */ 
+.................... BYTE read_txbuff(int &oset) 
+.................... { 
+....................     return(txbuff[oset]); 
+*
+0672:  MOVLW  10
+0673:  ADDWF  4D,W
+0674:  MOVWF  79
+0675:  MOVLW  01
+0676:  MOVWF  7A
+0677:  MOVF   79,W
+0678:  BTFSC  03,0
+0679:  INCF   7A,F
+067A:  MOVWF  04
+067B:  BCF    03,7
+067C:  BTFSC  7A,0
+067D:  BSF    03,7
+067E:  MOVF   00,W
+067F:  MOVWF  78
+*
+16D2:  MOVLW  10
+16D3:  ADDWF  4C,W
+16D4:  MOVWF  79
+16D5:  MOVLW  01
+16D6:  MOVWF  7A
+16D7:  MOVF   79,W
+16D8:  BTFSC  03,0
+16D9:  INCF   7A,F
+16DA:  MOVWF  04
+16DB:  BCF    03,7
+16DC:  BTFSC  7A,0
+16DD:  BSF    03,7
+16DE:  MOVF   00,W
+16DF:  MOVWF  78
+.................... } 
+....................  
+.................... /* Write a byte to the Tx buffer */ 
+.................... void write_txbuff(int &oset, BYTE &b) 
+.................... { 
+....................     txbuff[oset] = b; 
+*
+08B3:  MOVLW  10
+08B4:  ADDWF  4C,W
+08B5:  MOVWF  79
+08B6:  MOVLW  01
+08B7:  MOVWF  7A
+08B8:  MOVF   79,W
+08B9:  BTFSC  03,0
+08BA:  INCF   7A,F
+08BB:  MOVWF  04
+08BC:  BCF    03,7
+08BD:  BTFSC  7A,0
+08BE:  BSF    03,7
+08BF:  BSF    03,5
+08C0:  BSF    03,6
+08C1:  MOVF   26,W
+08C2:  MOVWF  00
+08C3:  BCF    03,5
+08C4:  BCF    03,6
+.................... } 
+....................  
+.................... /* Rx interrupt handler */ 
+.................... #INT_RDA 
+.................... void rx_handler(void) 
+.................... { 
+....................     BYTE b; 
+....................     BOOL escflag; 
+....................  
+....................     if (kbhit())                    // Make sure serial character received 
+*
+00CA:  BTFSS  0C,5
+00CB:  GOTO   17F
+....................     { 
+....................         if ((b = getchar()) == SLIP_ESC) 
+00CC:  GOTO   0BB
+00CD:  MOVF   78,W
+00CE:  BSF    03,5
+00CF:  BSF    03,6
+00D0:  MOVWF  33
+00D1:  MOVLW  DB
+00D2:  SUBWF  33,W
+00D3:  BTFSC  03,2
+00D4:  GOTO   0D8
+00D5:  BCF    03,5
+00D6:  BCF    03,6
+00D7:  GOTO   0E0
+00D8:  BCF    03,5
+00D9:  BCF    03,6
+....................             escflag = 1;            // SLIP escape character? 
+00DA:  BSF    03,5
+00DB:  BSF    03,6
+00DC:  BSF    34,0
+....................         else if (b == SLIP_END) 
+00DD:  BCF    03,5
+00DE:  BCF    03,6
+00DF:  GOTO   17F
+00E0:  MOVLW  C0
+00E1:  BSF    03,5
+00E2:  BSF    03,6
+00E3:  SUBWF  33,W
+00E4:  BTFSC  03,2
+00E5:  GOTO   0E9
+00E6:  BCF    03,5
+00E7:  BCF    03,6
+00E8:  GOTO   0F3
+00E9:  BCF    03,5
+00EA:  BCF    03,6
+....................         {                           // SLIP end-of-frame character? 
+....................             if (rxin > 0) 
+00EB:  MOVF   50,F
+00EC:  BTFSC  03,2
+00ED:  GOTO   0F2
+....................             {                       // If non-zero frame length.. 
+....................                 rxflag = 1;         // ..set Rx frame flag 
+00EE:  BSF    4B,2
+....................                 rxcount = rxin;     // Reset counter for new frame 
+00EF:  MOVF   50,W
+00F0:  MOVWF  52
+....................                 rxin = 0; 
+00F1:  CLRF   50
+....................             } 
+....................         }                           // Modem command 'AT...<CR>'? 
+....................         else if (b=='\r' && rxbuff[0]=='A') 
+00F2:  GOTO   17F
+00F3:  MOVLW  0D
+00F4:  BSF    03,5
+00F5:  BSF    03,6
+00F6:  SUBWF  33,W
+00F7:  BTFSC  03,2
+00F8:  GOTO   0FC
+00F9:  BCF    03,5
+00FA:  BCF    03,6
+00FB:  GOTO   109
+00FC:  BCF    03,5
+00FD:  BCF    03,6
+00FE:  MOVLW  41
+00FF:  BSF    03,5
+0100:  SUBWF  20,W
+0101:  BTFSC  03,2
+0102:  GOTO   105
+0103:  BCF    03,5
+0104:  GOTO   109
+0105:  BCF    03,5
+....................         { 
+....................             modemflag = 1;          // Set flag (can't be handled on interrupt) 
+0106:  BSF    4B,3
+....................             rxin = 0; 
+0107:  CLRF   50
+....................         } 
+....................         else                        // Normal SLIP character.. 
+0108:  GOTO   17F
+....................         { 
+....................             if (escflag)            // ..following an escape char? 
+0109:  BSF    03,5
+010A:  BSF    03,6
+010B:  BTFSC  34,0
+010C:  GOTO   110
+010D:  BCF    03,5
+010E:  BCF    03,6
+010F:  GOTO   136
+0110:  BCF    03,5
+0111:  BCF    03,6
+....................                 b = b==ESC_END ? SLIP_END : b==ESC_ESC ? SLIP_ESC : b; 
+0112:  MOVLW  DC
+0113:  BSF    03,5
+0114:  BSF    03,6
+0115:  SUBWF  33,W
+0116:  BTFSC  03,2
+0117:  GOTO   11B
+0118:  BCF    03,5
+0119:  BCF    03,6
+011A:  GOTO   11F
+011B:  BCF    03,5
+011C:  BCF    03,6
+011D:  MOVLW  C0
+011E:  GOTO   131
+011F:  MOVLW  DD
+0120:  BSF    03,5
+0121:  BSF    03,6
+0122:  SUBWF  33,W
+0123:  BTFSC  03,2
+0124:  GOTO   128
+0125:  BCF    03,5
+0126:  BCF    03,6
+0127:  GOTO   12C
+0128:  BCF    03,5
+0129:  BCF    03,6
+012A:  MOVLW  DB
+012B:  GOTO   131
+012C:  BSF    03,5
+012D:  BSF    03,6
+012E:  MOVF   33,W
+012F:  BCF    03,5
+0130:  BCF    03,6
+0131:  BSF    03,5
+0132:  BSF    03,6
+0133:  MOVWF  33
+0134:  BCF    03,5
+0135:  BCF    03,6
+....................             escflag = 0; 
+0136:  BSF    03,5
+0137:  BSF    03,6
+0138:  BCF    34,0
+....................             if (rxin == RXHDR_LEN-1) 
+0139:  MOVLW  27
+013A:  BCF    03,5
+013B:  BCF    03,6
+013C:  SUBWF  50,W
+013D:  BTFSS  03,2
+013E:  GOTO   143
+....................             {                       // If nearly at end of hdrs, reset checksum 
+....................                 rdcheckhi = rdchecklo = 0; 
+013F:  CLRF   56
+0140:  MOVF   56,W
+0141:  MOVWF  55
+....................                 rdcheckflag = 0; 
+0142:  BCF    4B,6
+....................             }                       // If after headers, calculate checksum 
+....................             if (rxin >= RXHDR_LEN) 
+0143:  MOVLW  28
+0144:  SUBWF  50,W
+0145:  BTFSS  03,0
+0146:  GOTO   16E
+....................             {                       // Alternate between checksum bytes.. 
+....................                 if (rdcheckflag) 
+0147:  BTFSS  4B,6
+0148:  GOTO   15B
+....................                 {                   // Update lo byte value 
+....................                     if ((rdchecklo = b+rdchecklo) < b) 
+0149:  BSF    03,5
+014A:  BSF    03,6
+014B:  MOVF   33,W
+014C:  BCF    03,5
+014D:  BCF    03,6
+014E:  ADDWF  56,F
+014F:  BSF    03,5
+0150:  BSF    03,6
+0151:  MOVF   33,W
+0152:  BCF    03,5
+0153:  BCF    03,6
+0154:  SUBWF  56,W
+0155:  BTFSC  03,0
+0156:  GOTO   15A
+....................                     {               // If lo byte overflow, increment hi byte 
+....................                         if (++rdcheckhi == 0) 
+0157:  INCFSZ 55,F
+0158:  GOTO   15A
+....................                             rdchecklo++; 
+0159:  INCF   56,F
+....................                     }               // ..and maybe carry back to lo byte! 
+....................                 } 
+....................                 else 
+015A:  GOTO   16C
+....................                 {                   // Update hi byte value 
+....................                     if ((rdcheckhi = b+rdcheckhi) < b) 
+015B:  BSF    03,5
+015C:  BSF    03,6
+015D:  MOVF   33,W
+015E:  BCF    03,5
+015F:  BCF    03,6
+0160:  ADDWF  55,F
+0161:  BSF    03,5
+0162:  BSF    03,6
+0163:  MOVF   33,W
+0164:  BCF    03,5
+0165:  BCF    03,6
+0166:  SUBWF  55,W
+0167:  BTFSC  03,0
+0168:  GOTO   16C
+....................                     {               // If hi byte overflow, increment lo byte 
+....................                         if (++rdchecklo == 0) 
+0169:  INCFSZ 56,F
+016A:  GOTO   16C
+....................                             rdcheckhi++; 
+016B:  INCF   55,F
+....................                     }               // ..and maybe carry back to hi byte! 
+....................                 } 
+....................                 rdcheckflag = !rdcheckflag; // Next time, check other byte 
+016C:  MOVLW  40
+016D:  XORWF  4B,F
+....................             } 
+....................             if (rxin < RXBUFFLEN)   // Save char if room left in buffer 
+016E:  MOVLW  50
+016F:  SUBWF  50,W
+0170:  BTFSC  03,0
+0171:  GOTO   17F
+....................             { 
+....................                 rxbuff[rxin++] = b; 
+0172:  MOVF   50,W
+0173:  INCF   50,F
+0174:  MOVWF  77
+0175:  MOVLW  A0
+0176:  ADDWF  77,W
+0177:  MOVWF  04
+0178:  BCF    03,7
+0179:  BSF    03,5
+017A:  BSF    03,6
+017B:  MOVF   33,W
+017C:  MOVWF  00
+017D:  BCF    03,5
+017E:  BCF    03,6
+....................             } 
+....................         } 
+....................     } 
+.................... } 
+.................... /* EOF */ 
+.................... 
+017F:  BCF    0A,3
+0180:  BCF    0A,4
+0181:  GOTO   020
+.................... #include "\picc\io\pictcp.h"    // ..and TCP functions 
+....................  /* TCP/IP functions for PIC Web server  Copyright (c) Iosoft Ltd 2000 
+.................... ** 
+.................... ** This software is only licensed for distribution with the book 'TCP/IP Lean', 
+.................... ** and may only be used for personal experimentation by the purchaser 
+.................... ** of that book, on condition that this copyright notice is retained. 
+.................... ** For commercial licensing, contact license@iosoft.co.uk 
+.................... ** 
+.................... ** This is experimental software; use it entirely at your own risk */ 
+....................  
+.................... /* Revisions: 
+.................... ** v0.01 JPB 30/3/00 
+.................... */ 
+....................  
+.................... BOOL get_tcp(void); 
+.................... void put_tcp(void); 
+.................... BOOL get_ping_req(void); 
+.................... void put_ping_rep(void); 
+.................... BOOL get_ip(void); 
+.................... void put_ip(WORD len); 
+.................... void inc_lword(LWORD &lw); 
+.................... void add_lword(LWORD &lw, WORD val); 
+....................  
+.................... /* Get a TCP seqment, return 0 if error */ 
+.................... BOOL get_tcp(void) 
+.................... { 
+....................     int hlen, n; 
+*
+0DB3:  BSF    03,5
+0DB4:  BSF    03,6
+0DB5:  BCF    17,0
+....................     BOOL ret=0; 
+....................  
+....................     checkhi = checklo = 0; 
+0DB6:  BCF    03,5
+0DB7:  BCF    03,6
+0DB8:  CLRF   54
+0DB9:  MOVF   54,W
+0DBA:  MOVWF  53
+....................     if (get_word(remport) && get_word(locport) &&   // Source & dest ports 
+....................         get_lword(rseq.l) && get_lword(rack.l) &&   // Seq & ack numbers 
+....................         get_byte(hlen) && get_byte(rflags) &&       // Header len & flags 
+....................         skip_word() && skip_lword())                // Window, csum, urgent ptr 
+*
+0DE8:  MOVF   78,F
+0DE9:  BTFSC  03,2
+0DEA:  GOTO   70A
+*
+0E18:  MOVF   78,F
+0E19:  BTFSC  03,2
+0E1A:  GOTO   70A
+*
+0E2B:  MOVF   78,F
+0E2C:  BTFSC  03,2
+0E2D:  GOTO   70A
+*
+0E3E:  MOVF   78,F
+0E3F:  BTFSC  03,2
+0E40:  GOTO   70A
+*
+0E4C:  MOVF   78,F
+0E4D:  BTFSC  03,2
+0E4E:  GOTO   70A
+*
+0E56:  MOVF   78,F
+0E57:  BTFSC  03,2
+0E58:  GOTO   70A
+0E59:  CALL   0A8
+0E5A:  MOVF   78,F
+0E5B:  BTFSC  03,2
+0E5C:  GOTO   70A
+*
+0E65:  MOVF   78,F
+0E66:  BTFSC  03,2
+0E67:  GOTO   70A
+....................     { 
+....................         iplen -= IPHDR_LEN;                         // Get TCP segment length 
+0E68:  MOVLW  14
+0E69:  SUBWF  42,F
+0E6A:  MOVLW  00
+0E6B:  BTFSS  03,0
+0E6C:  DECF   43,F
+0E6D:  SUBWF  43,F
+....................         check_byte(iplen>>8);                       // Check pseudoheader 
+0E6E:  MOVF   43,W
+0E6F:  BSF    03,5
+0E70:  BSF    03,6
+0E71:  MOVWF  18
+0E72:  CLRF   19
+0E73:  MOVF   18,W
+0E74:  MOVWF  2D
+0E75:  BCF    03,5
+0E76:  BCF    03,6
+0E77:  CALL   046
+....................         check_byte(iplen); 
+0E78:  MOVF   42,W
+0E79:  BSF    03,5
+0E7A:  BSF    03,6
+0E7B:  MOVWF  2D
+0E7C:  BCF    03,5
+0E7D:  BCF    03,6
+0E7E:  CALL   046
+....................         check_lword(local.l); 
+....................         check_lword(remote.l); 
+....................         check_byte(0); 
+*
+0EB7:  BSF    03,5
+0EB8:  BSF    03,6
+0EB9:  CLRF   2D
+0EBA:  BCF    03,5
+0EBB:  BCF    03,6
+0EBC:  CALL   046
+....................         check_byte(PCOL_TCP); 
+0EBD:  MOVLW  06
+0EBE:  BSF    03,5
+0EBF:  BSF    03,6
+0EC0:  MOVWF  2D
+0EC1:  BCF    03,5
+0EC2:  BCF    03,6
+0EC3:  CALL   046
+....................         rxout = (hlen>>2) + IPHDR_LEN; 
+0EC4:  BSF    03,5
+0EC5:  BSF    03,6
+0EC6:  MOVF   15,W
+0EC7:  BCF    03,5
+0EC8:  BCF    03,6
+0EC9:  MOVWF  77
+0ECA:  RRF    77,F
+0ECB:  RRF    77,F
+0ECC:  MOVLW  3F
+0ECD:  ANDWF  77,F
+0ECE:  MOVF   77,W
+0ECF:  MOVWF  77
+0ED0:  MOVLW  14
+0ED1:  ADDWF  77,W
+0ED2:  MOVWF  51
+....................         rpdlen = iplen - rxout + IPHDR_LEN; 
+0ED3:  MOVF   42,W
+0ED4:  BSF    03,5
+0ED5:  BSF    03,6
+0ED6:  MOVWF  18
+0ED7:  BCF    03,5
+0ED8:  BCF    03,6
+0ED9:  MOVF   51,W
+0EDA:  BSF    03,5
+0EDB:  BSF    03,6
+0EDC:  SUBWF  18,F
+0EDD:  BCF    03,5
+0EDE:  BCF    03,6
+0EDF:  MOVF   43,W
+0EE0:  BSF    03,5
+0EE1:  BSF    03,6
+0EE2:  MOVWF  19
+0EE3:  CLRW
+0EE4:  BTFSS  03,0
+0EE5:  DECF   19,F
+0EE6:  SUBWF  19,F
+0EE7:  MOVLW  14
+0EE8:  ADDWF  18,W
+0EE9:  BCF    03,5
+0EEA:  BCF    03,6
+0EEB:  MOVWF  44
+0EEC:  MOVLW  00
+0EED:  BTFSC  03,0
+0EEE:  ADDLW  01
+0EEF:  BSF    03,5
+0EF0:  BSF    03,6
+0EF1:  ADDWF  19,W
+0EF2:  BCF    03,5
+0EF3:  BCF    03,6
+0EF4:  MOVWF  45
+....................         checkhi += rdcheckhi; 
+0EF5:  MOVF   55,W
+0EF6:  ADDWF  53,F
+....................         checklo += rdchecklo; 
+0EF7:  MOVF   56,W
+0EF8:  ADDWF  54,F
+....................         ret = (checkhi==0xff) && (checklo==0xff); 
+0EF9:  INCF   53,W
+0EFA:  BTFSS  03,2
+0EFB:  GOTO   6FF
+0EFC:  INCF   54,W
+0EFD:  BTFSC  03,2
+0EFE:  GOTO   705
+0EFF:  BSF    03,5
+0F00:  BSF    03,6
+0F01:  BCF    17,0
+0F02:  BCF    03,5
+0F03:  BCF    03,6
+0F04:  GOTO   70A
+0F05:  BSF    03,5
+0F06:  BSF    03,6
+0F07:  BSF    17,0
+0F08:  BCF    03,5
+0F09:  BCF    03,6
+....................     } 
+....................     return(ret); 
+0F0A:  MOVLW  00
+0F0B:  BSF    03,5
+0F0C:  BSF    03,6
+0F0D:  BTFSC  17,0
+0F0E:  MOVLW  01
+0F0F:  BCF    03,5
+0F10:  BCF    03,6
+0F11:  MOVWF  78
+.................... } 
+....................  
+.................... /* Put out a TCP segment. Checksum must be set to correct value for data */ 
+.................... void put_tcp(void) 
+.................... { 
+....................     WORD len; 
+....................  
+....................     checkflag = 0;                  // Ensure we're on an even byte 
+*
+09FB:  BCF    4B,5
+....................     put_word(locport);              // Local and remote ports 
+09FC:  MOVF   33,W
+09FD:  BSF    03,5
+09FE:  BSF    03,6
+09FF:  MOVWF  21
+0A00:  BCF    03,5
+0A01:  BCF    03,6
+0A02:  MOVF   32,W
+0A03:  BSF    03,5
+0A04:  BSF    03,6
+0A05:  MOVWF  20
+0A06:  BCF    03,5
+0A07:  BCF    03,6
+0A08:  CALL   1E9
+....................     put_word(remport); 
+0A09:  MOVF   35,W
+0A0A:  BSF    03,5
+0A0B:  BSF    03,6
+0A0C:  MOVWF  21
+0A0D:  BCF    03,5
+0A0E:  BCF    03,6
+0A0F:  MOVF   34,W
+0A10:  BSF    03,5
+0A11:  BSF    03,6
+0A12:  MOVWF  20
+0A13:  BCF    03,5
+0A14:  BCF    03,6
+0A15:  CALL   1E9
+....................     put_lword(rack.l);              // Seq & ack numbers 
+....................     put_lword(rseq.l); 
+....................     put_byte(TCPHDR_LEN*4);         // Header len (no options) 
+*
+0A4E:  MOVLW  50
+0A4F:  BSF    03,5
+0A50:  BSF    03,6
+0A51:  MOVWF  26
+0A52:  BCF    03,5
+0A53:  BCF    03,6
+0A54:  CALL   0AF
+....................     put_byte(tflags); 
+0A55:  MOVF   41,W
+0A56:  BSF    03,5
+0A57:  BSF    03,6
+0A58:  MOVWF  26
+0A59:  BCF    03,5
+0A5A:  BCF    03,6
+0A5B:  CALL   0AF
+....................     put_byte(0x0b);                 // Window size word 
+0A5C:  MOVLW  0B
+0A5D:  BSF    03,5
+0A5E:  BSF    03,6
+0A5F:  MOVWF  26
+0A60:  BCF    03,5
+0A61:  BCF    03,6
+0A62:  CALL   0AF
+....................     put_byte(0xb8); 
+0A63:  MOVLW  B8
+0A64:  BSF    03,5
+0A65:  BSF    03,6
+0A66:  MOVWF  26
+0A67:  BCF    03,5
+0A68:  BCF    03,6
+0A69:  CALL   0AF
+....................     check_lword(local.l);           // Add pseudoheader to checksum 
+....................     check_lword(remote.l); 
+....................     check_byte(0); 
+*
+0AA2:  BSF    03,5
+0AA3:  BSF    03,6
+0AA4:  CLRF   2D
+0AA5:  BCF    03,5
+0AA6:  BCF    03,6
+0AA7:  CALL   046
+....................     check_byte(PCOL_TCP); 
+0AA8:  MOVLW  06
+0AA9:  BSF    03,5
+0AAA:  BSF    03,6
+0AAB:  MOVWF  2D
+0AAC:  BCF    03,5
+0AAD:  BCF    03,6
+0AAE:  CALL   046
+....................     len = tpdlen + TCPHDR_LEN; 
+0AAF:  MOVLW  14
+0AB0:  ADDWF  46,W
+0AB1:  BSF    03,5
+0AB2:  BSF    03,6
+0AB3:  MOVWF  1E
+0AB4:  MOVLW  00
+0AB5:  BTFSC  03,0
+0AB6:  ADDLW  01
+0AB7:  BCF    03,5
+0AB8:  BCF    03,6
+0AB9:  ADDWF  47,W
+0ABA:  BSF    03,5
+0ABB:  BSF    03,6
+0ABC:  MOVWF  1F
+....................     check_byte(len>>8); 
+0ABD:  MOVF   1F,W
+0ABE:  MOVWF  20
+0ABF:  CLRF   21
+0AC0:  MOVF   20,W
+0AC1:  MOVWF  2D
+0AC2:  BCF    03,5
+0AC3:  BCF    03,6
+0AC4:  CALL   046
+....................     check_byte(len); 
+0AC5:  BSF    03,5
+0AC6:  BSF    03,6
+0AC7:  MOVF   1E,W
+0AC8:  MOVWF  2D
+0AC9:  BCF    03,5
+0ACA:  BCF    03,6
+0ACB:  CALL   046
+....................     checkflag = 0; 
+0ACC:  BCF    4B,5
+....................     put_byte(~checkhi);             // Send checksum 
+0ACD:  MOVF   53,W
+0ACE:  BSF    03,5
+0ACF:  BSF    03,6
+0AD0:  MOVWF  20
+0AD1:  COMF   20,F
+0AD2:  MOVF   20,W
+0AD3:  MOVWF  26
+0AD4:  BCF    03,5
+0AD5:  BCF    03,6
+0AD6:  CALL   0AF
+....................     put_byte(~checklo); 
+0AD7:  MOVF   54,W
+0AD8:  BSF    03,5
+0AD9:  BSF    03,6
+0ADA:  MOVWF  20
+0ADB:  COMF   20,F
+0ADC:  MOVF   20,W
+0ADD:  MOVWF  26
+0ADE:  BCF    03,5
+0ADF:  BCF    03,6
+0AE0:  CALL   0AF
+....................     put_nullw();                    // Urgent ptr 
+0AE1:  CALL   0CE
+....................     if (!txi2c)                     // If data in RAM (i.e. not in ROM).. 
+0AE2:  MOVF   4E,W
+0AE3:  IORWF  4F,W
+0AE4:  BTFSS  03,2
+0AE5:  GOTO   2E8
+....................         txin += tpdlen;             // ..update Tx data pointer 
+0AE6:  MOVF   46,W
+0AE7:  ADDWF  4C,F
+....................     tx_end();                       // Transmit the packet 
+0AE8:  CALL   1A4
+0AE9:  RETLW  00
+.................... } 
+....................  
+.................... /* Get an ICMP echo request message, return 0 if error */ 
+.................... BOOL get_ping_req(void) 
+.................... { 
+....................     int i, n=0; 
+....................     BYTE b; 
+*
+0CD0:  BSF    03,5
+0CD1:  BSF    03,6
+0CD2:  CLRF   16
+0CD3:  BCF    18,0
+....................     BOOL ret=0; 
+....................  
+....................     checkhi = checklo = 0; 
+0CD4:  BCF    03,5
+0CD5:  BCF    03,6
+0CD6:  CLRF   54
+0CD7:  MOVF   54,W
+0CD8:  MOVWF  53
+....................     if (match_byte(8) && match_byte(0) && skip_word()) 
+0CD9:  MOVLW  08
+0CDA:  BSF    03,5
+0CDB:  BSF    03,6
+0CDC:  MOVWF  2B
+0CDD:  BCF    03,5
+0CDE:  BCF    03,6
+0CDF:  CALL   095
+0CE0:  MOVF   78,F
+0CE1:  BTFSC  03,2
+0CE2:  GOTO   50D
+0CE3:  BSF    03,5
+0CE4:  BSF    03,6
+0CE5:  CLRF   2B
+0CE6:  BCF    03,5
+0CE7:  BCF    03,6
+0CE8:  CALL   095
+0CE9:  MOVF   78,F
+0CEA:  BTFSC  03,2
+0CEB:  GOTO   50D
+0CEC:  CALL   0A8
+0CED:  MOVF   78,F
+0CEE:  BTFSC  03,2
+0CEF:  GOTO   50D
+....................     { 
+....................         rpdlen = 0; 
+0CF0:  CLRF   45
+0CF1:  CLRF   44
+....................         while (skip_byte()) 
+0CF2:  BCF    0A,3
+0CF3:  CALL   7EB
+0CF4:  BSF    0A,3
+0CF5:  MOVF   78,F
+0CF6:  BTFSC  03,2
+0CF7:  GOTO   4FC
+....................             rpdlen++; 
+0CF8:  INCF   44,F
+0CF9:  BTFSC  03,2
+0CFA:  INCF   45,F
+0CFB:  GOTO   4F2
+....................         ret = (checkhi==0xff) && (checklo==0xff); 
+0CFC:  INCF   53,W
+0CFD:  BTFSS  03,2
+0CFE:  GOTO   502
+0CFF:  INCF   54,W
+0D00:  BTFSC  03,2
+0D01:  GOTO   508
+0D02:  BSF    03,5
+0D03:  BSF    03,6
+0D04:  BCF    18,0
+0D05:  BCF    03,5
+0D06:  BCF    03,6
+0D07:  GOTO   50D
+0D08:  BSF    03,5
+0D09:  BSF    03,6
+0D0A:  BSF    18,0
+0D0B:  BCF    03,5
+0D0C:  BCF    03,6
+....................     } 
+....................     return(ret); 
+0D0D:  MOVLW  00
+0D0E:  BSF    03,5
+0D0F:  BSF    03,6
+0D10:  BTFSC  18,0
+0D11:  MOVLW  01
+0D12:  BCF    03,5
+0D13:  BCF    03,6
+0D14:  MOVWF  78
+.................... } 
+....................  
+.................... /* Put out an ICMP echo response message */ 
+.................... void put_ping_rep(void) 
+.................... { 
+....................     int i; 
+....................  
+....................     put_nullw();                    // Type and code 
+*
+0D33:  CALL   0CE
+....................     checkhi = checklo = 0;          // Clear checksum 
+0D34:  CLRF   54
+0D35:  MOVF   54,W
+0D36:  MOVWF  53
+....................     checkflag = 0;                  // Reset flag in case odd data len 
+0D37:  BCF    4B,5
+....................     check_bytes(&rxbuff[IPHDR_LEN+4], tpdlen);  // Calculate checksum of data 
+0D38:  MOVLW  00
+0D39:  BSF    03,5
+0D3A:  BSF    03,6
+0D3B:  MOVWF  17
+0D3C:  MOVLW  B8
+0D3D:  MOVWF  16
+0D3E:  BCF    03,5
+0D3F:  BCF    03,6
+0D40:  MOVF   46,W
+0D41:  BSF    03,5
+0D42:  BSF    03,6
+0D43:  MOVWF  18
+0D44:  BCF    03,5
+0D45:  BCF    03,6
+....................     put_byte(~checkhi);             // Checksum value 
+*
+0D6E:  MOVF   53,W
+0D6F:  BSF    03,5
+0D70:  BSF    03,6
+0D71:  MOVWF  16
+0D72:  COMF   16,F
+0D73:  MOVF   16,W
+0D74:  MOVWF  26
+0D75:  BCF    03,5
+0D76:  BCF    03,6
+0D77:  CALL   0AF
+....................     put_byte(~checklo); 
+0D78:  MOVF   54,W
+0D79:  BSF    03,5
+0D7A:  BSF    03,6
+0D7B:  MOVWF  16
+0D7C:  COMF   16,F
+0D7D:  MOVF   16,W
+0D7E:  MOVWF  26
+0D7F:  BCF    03,5
+0D80:  BCF    03,6
+0D81:  CALL   0AF
+....................     rxout = IPHDR_LEN + 4; 
+0D82:  MOVLW  18
+0D83:  MOVWF  51
+....................     for (i=0; i<tpdlen; i++)        // Copy data 
+0D84:  BSF    03,5
+0D85:  BSF    03,6
+0D86:  CLRF   15
+0D87:  BCF    03,5
+0D88:  BCF    03,6
+0D89:  MOVF   47,F
+0D8A:  BTFSS  03,2
+0D8B:  GOTO   597
+0D8C:  MOVF   46,W
+0D8D:  BSF    03,5
+0D8E:  BSF    03,6
+0D8F:  SUBWF  15,W
+0D90:  BTFSS  03,0
+0D91:  GOTO   595
+0D92:  BCF    03,5
+0D93:  BCF    03,6
+0D94:  GOTO   5AD
+0D95:  BCF    03,5
+0D96:  BCF    03,6
+....................         put_byte(rxbuff[rxout++]); 
+0D97:  MOVF   51,W
+0D98:  INCF   51,F
+0D99:  MOVWF  77
+0D9A:  MOVLW  A0
+0D9B:  ADDWF  77,W
+0D9C:  MOVWF  04
+0D9D:  BCF    03,7
+0D9E:  MOVF   00,W
+0D9F:  BSF    03,5
+0DA0:  BSF    03,6
+0DA1:  MOVWF  16
+0DA2:  MOVF   16,W
+0DA3:  MOVWF  26
+0DA4:  BCF    03,5
+0DA5:  BCF    03,6
+0DA6:  CALL   0AF
+0DA7:  BSF    03,5
+0DA8:  BSF    03,6
+0DA9:  INCF   15,F
+0DAA:  BCF    03,5
+0DAB:  BCF    03,6
+0DAC:  GOTO   589
+....................     tx_end(); 
+0DAD:  CALL   1A4
+.................... } 
+....................  
+.................... /* Send out an IP header, given data length */ 
+.................... void put_ip(WORD len) 
+.................... { 
+....................     static BYTE id=0; 
+....................  
+....................     checkhi = checklo = 0;          // Clear checksum 
+*
+08DB:  CLRF   54
+08DC:  MOVF   54,W
+08DD:  MOVWF  53
+....................     checkflag = 0; 
+08DE:  BCF    4B,5
+....................     tx_start(); 
+....................     put_byte(0x45);                 // Version & hdr len */ 
+*
+08E4:  MOVLW  45
+08E5:  BSF    03,5
+08E6:  BSF    03,6
+08E7:  MOVWF  26
+08E8:  BCF    03,5
+08E9:  BCF    03,6
+08EA:  CALL   0AF
+....................     put_null();                     // Service 
+08EB:  BCF    0A,3
+08EC:  CALL   7F3
+08ED:  BSF    0A,3
+....................     len += IPHDR_LEN; 
+08EE:  MOVLW  14
+08EF:  BSF    03,5
+08F0:  BSF    03,6
+08F1:  ADDWF  20,F
+08F2:  MOVLW  00
+08F3:  BTFSC  03,0
+08F4:  ADDLW  01
+08F5:  ADDWF  21,F
+....................     put_byte(len>>8);               // Length word 
+08F6:  MOVF   21,W
+08F7:  MOVWF  22
+08F8:  CLRF   23
+08F9:  MOVF   22,W
+08FA:  MOVWF  26
+08FB:  BCF    03,5
+08FC:  BCF    03,6
+08FD:  CALL   0AF
+....................     put_byte(len); 
+08FE:  BSF    03,5
+08FF:  BSF    03,6
+0900:  MOVF   20,W
+0901:  MOVWF  26
+0902:  BCF    03,5
+0903:  BCF    03,6
+0904:  CALL   0AF
+....................     put_null();                     // Ident word 
+0905:  BCF    0A,3
+0906:  CALL   7F3
+0907:  BSF    0A,3
+....................     put_byte(++id); 
+0908:  INCF   58,F
+0909:  MOVF   58,W
+090A:  BSF    03,5
+090B:  BSF    03,6
+090C:  MOVWF  26
+090D:  BCF    03,5
+090E:  BCF    03,6
+090F:  CALL   0AF
+....................     put_nullw();                    // Flags & fragment offset 
+0910:  CALL   0CE
+....................     put_byte(100);                  // Time To Live 
+0911:  MOVLW  64
+0912:  BSF    03,5
+0913:  BSF    03,6
+0914:  MOVWF  26
+0915:  BCF    03,5
+0916:  BCF    03,6
+0917:  CALL   0AF
+....................     put_byte(ipcol);                // Protocol 
+0918:  MOVF   29,W
+0919:  BSF    03,5
+091A:  BSF    03,6
+091B:  MOVWF  26
+091C:  BCF    03,5
+091D:  BCF    03,6
+091E:  CALL   0AF
+....................     check_lword(local.l);           // Include addresses in checksum 
+....................     check_lword(remote.l); 
+....................     put_byte(~checkhi);             // Checksum 
+*
+0957:  MOVF   53,W
+0958:  BSF    03,5
+0959:  BSF    03,6
+095A:  MOVWF  22
+095B:  COMF   22,F
+095C:  MOVF   22,W
+095D:  MOVWF  26
+095E:  BCF    03,5
+095F:  BCF    03,6
+0960:  CALL   0AF
+....................     put_byte(~checklo); 
+0961:  MOVF   54,W
+0962:  BSF    03,5
+0963:  BSF    03,6
+0964:  MOVWF  22
+0965:  COMF   22,F
+0966:  MOVF   22,W
+0967:  MOVWF  26
+0968:  BCF    03,5
+0969:  BCF    03,6
+096A:  CALL   0AF
+....................     put_lword(local.l);             // Source & destination IP addrs 
+....................     put_lword(remote.l); 
+*
+09A3:  RETLW  00
+.................... } 
+....................  
+.................... /* Increment a longword value */ 
+.................... void inc_lword(LWORD &lw) 
+.................... { 
+....................     if (++lw.b[0] == 0) 
+*
+101B:  INCFSZ 36,F
+101C:  GOTO   022
+....................     { 
+....................         if (++lw.b[1] == 0) 
+101D:  INCFSZ 37,F
+101E:  GOTO   022
+....................         { 
+....................             if (++lw.b[2] == 0) 
+101F:  INCFSZ 38,F
+1020:  GOTO   022
+....................                 ++lw.b[3]; 
+1021:  INCF   39,F
+....................         } 
+....................     } 
+.................... } 
+....................  
+.................... /* Add a 16-bit value to a longword */ 
+.................... void add_lword(LWORD &lw, WORD val) 
+.................... { 
+....................     if ((lw.w[0] += val) < val) 
+*
+105A:  MOVF   1C,W
+105B:  BCF    03,5
+105C:  BCF    03,6
+105D:  ADDWF  36,F
+105E:  BSF    03,5
+105F:  BSF    03,6
+1060:  MOVF   1D,W
+1061:  BTFSC  03,0
+1062:  ADDLW  01
+1063:  BCF    03,5
+1064:  BCF    03,6
+1065:  ADDWF  37,F
+1066:  BSF    03,5
+1067:  BSF    03,6
+1068:  MOVF   1D,W
+1069:  BCF    03,5
+106A:  BCF    03,6
+106B:  SUBWF  37,W
+106C:  BTFSS  03,0
+106D:  GOTO   07E
+106E:  BSF    03,5
+106F:  BSF    03,6
+1070:  MOVF   1D,W
+1071:  BCF    03,5
+1072:  BCF    03,6
+1073:  SUBWF  37,W
+1074:  BTFSS  03,2
+1075:  GOTO   081
+1076:  BSF    03,5
+1077:  BSF    03,6
+1078:  MOVF   1C,W
+1079:  BCF    03,5
+107A:  BCF    03,6
+107B:  SUBWF  36,W
+107C:  BTFSC  03,0
+107D:  GOTO   081
+*
+1095:  MOVF   1C,W
+1096:  BCF    03,5
+1097:  BCF    03,6
+1098:  ADDWF  36,F
+1099:  BSF    03,5
+109A:  BSF    03,6
+109B:  MOVF   1D,W
+109C:  BTFSC  03,0
+109D:  ADDLW  01
+109E:  BCF    03,5
+109F:  BCF    03,6
+10A0:  ADDWF  37,F
+10A1:  BSF    03,5
+10A2:  BSF    03,6
+10A3:  MOVF   1D,W
+10A4:  BCF    03,5
+10A5:  BCF    03,6
+10A6:  SUBWF  37,W
+10A7:  BTFSS  03,0
+10A8:  GOTO   0B9
+10A9:  BSF    03,5
+10AA:  BSF    03,6
+10AB:  MOVF   1D,W
+10AC:  BCF    03,5
+10AD:  BCF    03,6
+10AE:  SUBWF  37,W
+10AF:  BTFSS  03,2
+10B0:  GOTO   0BC
+10B1:  BSF    03,5
+10B2:  BSF    03,6
+10B3:  MOVF   1C,W
+10B4:  BCF    03,5
+10B5:  BCF    03,6
+10B6:  SUBWF  36,W
+10B7:  BTFSC  03,0
+10B8:  GOTO   0BC
+....................         lw.w[1]++; 
+*
+107E:  INCF   38,F
+107F:  BTFSC  03,2
+1080:  INCF   39,F
+*
+10B9:  INCF   38,F
+10BA:  BTFSC  03,2
+10BB:  INCF   39,F
+.................... } 
+....................  
+.................... /* EOF */ 
+....................  
+.................... 
+.................... #include "\picc\io\webrom.h"    // ..and ROM filesystem definitions 
+....................  /* Definitions for Web ROM filesystem */ 
+....................  
+.................... /* The filesystem is in 1 or more ROMs. At the start of the first ROM is a 
+.................... ** directory of 1 or more filename blocks, each of which have pointers to 
+.................... ** data blocks. The end of the directory is marked by a dummy length of FFFFh 
+.................... ** 
+.................... ** All the files include the appropriate HTTP headers. 
+.................... */ 
+....................  
+.................... #define ROM_FNAMELEN    12  /* Maximum filename size */ 
+....................  
+.................... typedef struct          /* Filename block structure */ 
+.................... { 
+....................     WORD len;               /* Length of file in bytes */ 
+....................     WORD start;             /* Start address of file data in ROM */ 
+....................     WORD check;             /* TCP checksum of file */ 
+....................     BYTE flags;             /* Embedded Gateway Interface (EGI) flags */ 
+....................     char name[ROM_FNAMELEN];/* Lower-case filename with extension */ 
+.................... } ROM_FNAME; 
+....................  
+.................... /* Embedded Gateway Interface (EGI) flag values */ 
+.................... #define EGI_ATVARS      0x01    /* '@' variable substitution scheme */ 
+.................... #define EGI_HASHVARS    0x02    /* '#' and '|' boolean variables */ 
+....................  
+.................... /* EOF */ 
+....................  
+.................... 
+....................  
+.................... #use fast_io(A)             // I'll set the direction bits on I/O ports 
+.................... #use fast_io(B) 
+.................... #use fast_io(C) 
+....................  
+.................... #byte   PORTA=5             // Main I/O ports 
+.................... #byte   PORTB=6 
+.................... #byte   PORTC=7 
+.................... #define ALL_OUT     0       // Direction (TRIS) values 
+.................... #define ALL_IN      0xff 
+....................  
+.................... // Timer 1 trigger value; tick time = (1024 x DIV) / CPU_CLK 
+.................... // 50 ms ticks with 7.3728 MHz clock requires divisor 45 prescale 8 
+.................... #define TIMER1_DIV   45 
+.................... #define TIMER1_SET   (T1_INTERNAL | T1_DIV_BY_8) 
+....................  
+.................... #use I2C (MASTER, SDA=PIN_C4, SCL=PIN_C3, RESTART_WDT, FAST) 
+*
+0214:  MOVLW  08
+0215:  MOVWF  78
+0216:  NOP
+0217:  CLRWDT
+0218:  BCF    07,3
+0219:  BSF    03,5
+021A:  BCF    07,3
+021B:  CLRWDT
+021C:  BSF    03,6
+021D:  RLF    2D,F
+021E:  BCF    03,5
+021F:  BCF    03,6
+0220:  BCF    07,4
+0221:  BTFSS  03,0
+0222:  GOTO   226
+0223:  BSF    03,5
+0224:  BSF    07,4
+0225:  BCF    03,5
+0226:  BTFSC  03,0
+0227:  GOTO   22B
+0228:  BSF    03,5
+0229:  BCF    07,4
+022A:  BCF    03,5
+022B:  BSF    03,5
+022C:  BSF    07,3
+022D:  BCF    03,5
+022E:  BTFSS  07,3
+022F:  GOTO   22E
+0230:  DECFSZ 78,F
+0231:  GOTO   216
+0232:  CLRWDT
+0233:  BCF    07,3
+0234:  BSF    03,5
+0235:  BCF    07,3
+0236:  NOP
+0237:  BSF    07,4
+0238:  CLRWDT
+0239:  CLRWDT
+023A:  CLRWDT
+023B:  CLRWDT
+023C:  BSF    07,3
+023D:  BCF    03,5
+023E:  BTFSS  07,3
+023F:  GOTO   23E
+0240:  CLRF   78
+0241:  CLRWDT
+0242:  BTFSC  07,4
+0243:  BSF    78,0
+0244:  CLRWDT
+0245:  BCF    07,3
+0246:  BSF    03,5
+0247:  BCF    07,3
+0248:  BCF    03,5
+0249:  BCF    07,4
+024A:  BSF    03,5
+024B:  BCF    07,4
+024C:  BCF    03,5
+024D:  RETLW  00
+024E:  MOVLW  08
+024F:  BSF    03,5
+0250:  BSF    03,6
+0251:  MOVWF  31
+0252:  BCF    03,5
+0253:  BCF    03,6
+0254:  MOVF   77,W
+0255:  BSF    03,5
+0256:  BSF    03,6
+0257:  MOVWF  32
+0258:  BCF    03,5
+0259:  BCF    03,6
+025A:  BSF    03,5
+025B:  BSF    07,4
+025C:  CLRWDT
+025D:  BSF    07,3
+025E:  BCF    03,5
+025F:  BTFSS  07,3
+0260:  GOTO   25F
+0261:  BTFSC  07,4
+0262:  BSF    03,0
+0263:  BTFSS  07,4
+0264:  BCF    03,0
+0265:  RLF    78,F
+0266:  CLRWDT
+0267:  BSF    03,5
+0268:  BCF    07,3
+0269:  BCF    03,5
+026A:  BCF    07,3
+026B:  BSF    03,5
+026C:  BSF    03,6
+026D:  DECFSZ 31,F
+026E:  GOTO   270
+026F:  GOTO   273
+0270:  BCF    03,5
+0271:  BCF    03,6
+0272:  GOTO   25A
+0273:  BCF    03,6
+0274:  BSF    07,4
+0275:  CLRWDT
+0276:  BCF    03,5
+0277:  BCF    07,4
+0278:  BSF    03,5
+0279:  BSF    03,6
+027A:  MOVF   32,W
+027B:  BTFSC  03,2
+027C:  GOTO   280
+027D:  BCF    03,6
+027E:  BCF    07,4
+027F:  BSF    03,6
+0280:  BCF    03,5
+0281:  BCF    03,6
+0282:  NOP
+0283:  BSF    03,5
+0284:  BSF    07,3
+0285:  BCF    03,5
+0286:  BTFSS  07,3
+0287:  GOTO   286
+0288:  CLRWDT
+0289:  BCF    07,3
+028A:  BSF    03,5
+028B:  BCF    07,3
+028C:  CLRWDT
+028D:  BCF    03,5
+028E:  BCF    07,4
+028F:  BSF    03,5
+0290:  BCF    07,4
+0291:  BCF    03,5
+0292:  RETLW  00
+.................... #define SENSOR_ADDR  0x9e   // i2c addr for temperature sensor 
+.................... #define EEROM_ADDR   0xa0   // i2c addr for eerom 
+.................... #define RTC_ADDR     0xa2   // i2c addr for real-time clock 
+....................  
+.................... #define DIAG_LED     PIN_C2 // Diagnostic LED Pin ident 
+....................  
+.................... #define TFIN        0x01    // Option flags: no more data 
+.................... #define TSYN        0x02    //           sync sequence nums 
+.................... #define TRST        0x04    //           reset connection 
+.................... #define TPUSH       0x08    //           push buffered data 
+.................... #define TACK        0x10    //           acknowledgement 
+.................... #define TURGE       0x20    //           urgent 
+....................  
+.................... #define DAYPORT     13      // TCP Port numbers: daytime & HHTP 
+.................... #define HTTPORT     80 
+....................  
+.................... #define LEDONTIME   2       // Ticks for LED on 
+.................... #define LEDOFFTIME  100     // Ticks for LED off 
+.................... BOOL ledon;                 // Diagnostic LED state 
+.................... int ledonticks, ledoffticks;// LED tick counts 
+.................... int tickcount;              // Timer tick count 
+....................  
+.................... #define DAYTIME_LEN     10  // Format string for daytime response 
+.................... #define DAYTIME_STR     "%02x:%02x:%02x\r\n" 
+....................  
+.................... #define HTTP_FAIL_LEN   34  // HTTP string for internal error 
+.................... #define HTTP_FAIL       "HTTP/ 200 OK\r\n\r\nPICWEB ROM error\r\n" 
+....................  
+.................... #define HTML_OK_LEN     44  // HTTP header for HTML text 
+.................... #define HTML_OK         "HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n" 
+....................  
+.................... #define TEXT_OK_LEN     45  // HTTP header for plain text 
+.................... #define TEXT_OK         "HTTP/1.0 200 OK\r\nContent-type: text/plain\r\n\r\n" 
+....................  
+.................... #define MAXFILES    100     // Limit on ROM file count (to stop runaway) 
+.................... typedef union               // ROM file directory entry format 
+.................... { 
+....................     ROM_FNAME f;                // Union of filename.. 
+....................     BYTE b[sizeof(ROM_FNAME)];  // ..with byte values for i2c transfer 
+.................... } ROM_DIR; 
+....................  
+.................... ROM_DIR romdir;             // Storage for one directory entry 
+.................... int fileidx;                // Index of current file (1=first, 0=error) 
+....................  
+.................... typedef struct 
+.................... {                           // Real-Time Clock (RTC) register format 
+....................     BYTE secs:4, sec10:4;       // BCD seconds 
+....................     BYTE mins:4, min10:4;       // BCD minutes 
+....................     BYTE hours:4, hour10:4;     // BCD hours 
+.................... } RTC_DATA; 
+.................... typedef union 
+.................... {                           // Union of RTC registers.. 
+....................     RTC_DATA d; 
+....................     BYTE b[3];              // ..with byte data for i2c transfer 
+.................... } RTC_DATA_B; 
+....................  
+.................... RTC_DATA_B rtc;             // Storage for current time from RTC 
+.................... BYTE templo, temphi;        // Storage for current temperature (hi/lo bytes) 
+....................  
+.................... /* Protoypes */ 
+.................... void daytime_rx(void); 
+.................... BOOL http_rx(void); 
+.................... void check_formargs(void); 
+.................... BOOL http_tx(void); 
+.................... #separate 
+.................... void tcp_rx(void); 
+.................... #separate 
+.................... void tx_poll(void); 
+.................... void rx_poll(void); 
+.................... void get_rtc_time(void); 
+.................... void set_rtc_time(void); 
+.................... void get_temperature(void); 
+.................... #separate 
+.................... BOOL find_file(void); 
+.................... BOOL open_file(void); 
+.................... void close_file(void); 
+.................... BOOL tx_file_byte(void); 
+.................... void tx_byte_inv(BYTE b); 
+.................... BOOL geticks(void); 
+.................... BOOL timeout(int &var, int tout); 
+.................... void setled(BOOL on); 
+....................  
+.................... void main(void) 
+.................... { 
+*
+0B4F:  MOVLW  5F
+0B50:  MOVWF  20
+0B51:  MOVLW  21
+0B52:  MOVWF  04
+0B53:  MOVLW  00
+0B54:  MOVWF  00
+0B55:  INCF   04,F
+0B56:  DECFSZ 20,F
+0B57:  GOTO   354
+0B58:  MOVLW  50
+0B59:  MOVWF  77
+0B5A:  MOVLW  A0
+0B5B:  MOVWF  04
+0B5C:  MOVLW  00
+0B5D:  MOVWF  00
+0B5E:  INCF   04,F
+0B5F:  DECFSZ 77,F
+0B60:  GOTO   35D
+0B61:  BSF    03,7
+0B62:  MOVLW  6F
+0B63:  BSF    03,6
+0B64:  MOVWF  10
+0B65:  MOVLW  11
+0B66:  MOVWF  04
+0B67:  MOVLW  00
+0B68:  BCF    03,6
+0B69:  MOVWF  00
+0B6A:  INCF   04,F
+0B6B:  BSF    03,6
+0B6C:  DECFSZ 10,F
+0B6D:  GOTO   36F
+0B6E:  GOTO   371
+0B6F:  BCF    03,6
+0B70:  GOTO   369
+0B71:  MOVLW  60
+0B72:  BCF    03,6
+0B73:  MOVWF  77
+0B74:  MOVLW  90
+0B75:  MOVWF  04
+0B76:  MOVLW  00
+0B77:  MOVWF  00
+0B78:  INCF   04,F
+0B79:  DECFSZ 77,F
+0B7A:  GOTO   377
+0B7B:  BCF    03,7
+0B7C:  CLRF   04
+0B7D:  BCF    03,7
+0B7E:  MOVLW  1F
+0B7F:  ANDWF  03,F
+0B80:  MOVLW  9F
+0B81:  MOVWF  04
+0B82:  BCF    03,7
+0B83:  MOVLW  07
+0B84:  MOVWF  00
+0B85:  CLRF   28
+0B86:  MOVLW  02
+0B87:  BSF    03,5
+0B88:  MOVWF  19
+0B89:  MOVLW  22
+0B8A:  MOVWF  18
+0B8B:  MOVLW  90
+0B8C:  BCF    03,5
+0B8D:  MOVWF  18
+0B8E:  CLRF   58
+0B8F:  BCF    75,0
+0B90:  CLRF   76
+0B91:  CLRF   7C
+....................     setup_port_a(NO_ANALOGS);           // No analogue I/Ps 
+0B92:  MOVLW  9F
+0B93:  MOVWF  04
+0B94:  BCF    03,7
+0B95:  MOVLW  06
+0B96:  MOVWF  00
+....................     set_tris_a(ALL_IN); 
+0B97:  MOVLW  FF
+0B98:  TRIS   5
+.................... #if PORTBINV 
+....................     PORTB = 0xff;                       // Initialise ports 
+.................... #else 
+....................     PORTB = 0; 
+0B99:  CLRF   06
+.................... #endif         
+....................     PORTC = 0xff; 
+0B9A:  MOVLW  FF
+0B9B:  MOVWF  07
+....................     set_tris_b(ALL_OUT);                // Port B LEDs 
+0B9C:  MOVLW  00
+0B9D:  TRIS   6
+....................     set_tris_c(0xf8);                   // Port C mostly I/Ps 
+0B9E:  MOVLW  F8
+0B9F:  TRIS   7
+....................     setup_timer_1(TIMER1_SET);          // Initialise timer 
+0BA0:  MOVLW  35
+0BA1:  MOVWF  10
+....................     geticks(); 
+0BA2:  BCF    0A,3
+0BA3:  CALL   182
+0BA4:  BSF    0A,3
+....................     setled(1);                          // Diagnostic LED flash on 
+0BA5:  MOVLW  01
+0BA6:  BSF    03,5
+0BA7:  BSF    03,6
+0BA8:  MOVWF  10
+0BA9:  BCF    03,5
+0BAA:  BCF    03,6
+0BAB:  BCF    0A,3
+0BAC:  CALL   1A1
+0BAD:  BSF    0A,3
+....................     enable_interrupts(INT_RDA);         // Enable serial Rx interrupts 
+0BAE:  MOVLW  8C
+0BAF:  MOVWF  04
+0BB0:  BCF    03,7
+0BB1:  BSF    00,5
+....................     enable_interrupts(GLOBAL); 
+0BB2:  MOVLW  C0
+0BB3:  IORWF  0B,F
+....................     // ***** MAIN LOOP ***** // 
+....................     while (1) 
+....................     { 
+....................         restart_wdt();                  // Kick watchdog 
+0BB4:  CLRWDT
+....................         geticks();                      // Get timer ticks 
+0BB5:  BCF    0A,3
+0BB6:  CALL   182
+0BB7:  BSF    0A,3
+....................         if (rxin || timeout(ledoffticks, LEDOFFTIME)) 
+0BB8:  MOVF   50,F
+0BB9:  BTFSS  03,2
+0BBA:  GOTO   3EB
+0BBB:  MOVLW  64
+0BBC:  BSF    03,5
+0BBD:  BSF    03,6
+0BBE:  MOVWF  11
+*
+0BE8:  MOVF   78,F
+0BE9:  BTFSC  03,2
+0BEA:  GOTO   3F5
+....................             setled(1); 
+0BEB:  MOVLW  01
+0BEC:  BSF    03,5
+0BED:  BSF    03,6
+0BEE:  MOVWF  10
+0BEF:  BCF    03,5
+0BF0:  BCF    03,6
+0BF1:  BCF    0A,3
+0BF2:  CALL   1A1
+0BF3:  BSF    0A,3
+....................         else if (ledon && timeout(ledonticks, LEDONTIME)) 
+0BF4:  GOTO   42F
+0BF5:  BTFSS  4B,7
+0BF6:  GOTO   42F
+0BF7:  MOVLW  02
+0BF8:  BSF    03,5
+0BF9:  BSF    03,6
+0BFA:  MOVWF  11
+*
+0C24:  MOVF   78,F
+0C25:  BTFSC  03,2
+0C26:  GOTO   42F
+....................             setled(0); 
+0C27:  BSF    03,5
+0C28:  BSF    03,6
+0C29:  CLRF   10
+0C2A:  BCF    03,5
+0C2B:  BCF    03,6
+0C2C:  BCF    0A,3
+0C2D:  CALL   1A1
+0C2E:  BSF    0A,3
+....................         if (txflag)                     // If transmitting, send next char 
+0C2F:  BTFSS  4B,1
+0C30:  GOTO   434
+....................             tx_poll(); 
+0C31:  BCF    0A,3
+0C32:  GOTO   441
+0C33:  BSF    0A,3
+....................         rx_poll();                      // Check for Rx modem commands 
+0C34:  GOTO   000
+....................         if (rxflag)                     // If frame received.. 
+0C35:  BTFSS  4B,2
+0C36:  GOTO   726
+....................         { 
+....................             rxflag = 0;                 // ..prepare for another 
+0C37:  BCF    4B,2
+....................             rxout = 0; 
+0C38:  CLRF   51
+....................             get_ip();                   // ..and process Rx frame 
+....................         } 
+....................     } 
+*
+0F26:  GOTO   3B4
+.................... } 
+....................  
+0F27:  SLEEP
+.................... /* Get an IP message; if ping, send response */ 
+.................... BOOL get_ip(void) 
+.................... { 
+....................     BYTE b, hi, lo; 
+....................     int n=0; 
+*
+0C39:  BSF    03,5
+0C3A:  BSF    03,6
+0C3B:  CLRF   13
+0C3C:  BSF    14,0
+....................     BOOL ret=1; 
+....................  
+....................     slipend = checkflag = 0;                        // Clear checksum 
+0C3D:  BCF    03,5
+0C3E:  BCF    03,6
+0C3F:  BCF    4B,5
+0C40:  BCF    4B,4
+....................     checkhi = checklo = 0; 
+0C41:  CLRF   54
+0C42:  MOVF   54,W
+0C43:  MOVWF  53
+....................     if (match_byte(0x45) && skip_byte() &&          // Version, service 
+....................         get_word(iplen) && skip_word() &&           // Len, ID 
+....................         skip_word() &&  skip_byte() &&              // Frags, TTL 
+....................         get_byte(ipcol) && skip_word() &&           // Protocol, checksum 
+....................         get_lword(remote.l) && get_lword(local.l) &&// Addresses 
+....................         checkhi==0xff && checklo==0xff)             // Checksum OK? 
+0C44:  MOVLW  45
+0C45:  BSF    03,5
+0C46:  BSF    03,6
+0C47:  MOVWF  2B
+0C48:  BCF    03,5
+0C49:  BCF    03,6
+0C4A:  CALL   095
+0C4B:  MOVF   78,F
+0C4C:  BTFSC  03,2
+0C4D:  GOTO   71D
+0C4E:  BCF    0A,3
+0C4F:  CALL   7EB
+0C50:  BSF    0A,3
+0C51:  MOVF   78,F
+0C52:  BTFSC  03,2
+0C53:  GOTO   71D
+*
+0C81:  MOVF   78,F
+0C82:  BTFSC  03,2
+0C83:  GOTO   71D
+0C84:  CALL   0A8
+0C85:  MOVF   78,F
+0C86:  BTFSC  03,2
+0C87:  GOTO   71D
+0C88:  CALL   0A8
+0C89:  MOVF   78,F
+0C8A:  BTFSC  03,2
+0C8B:  GOTO   71D
+0C8C:  BCF    0A,3
+0C8D:  CALL   7EB
+0C8E:  BSF    0A,3
+0C8F:  MOVF   78,F
+0C90:  BTFSC  03,2
+0C91:  GOTO   71D
+*
+0C99:  MOVF   78,F
+0C9A:  BTFSC  03,2
+0C9B:  GOTO   71D
+0C9C:  CALL   0A8
+0C9D:  MOVF   78,F
+0C9E:  BTFSC  03,2
+0C9F:  GOTO   71D
+*
+0CB0:  MOVF   78,F
+0CB1:  BTFSC  03,2
+0CB2:  GOTO   71D
+*
+0CC3:  MOVF   78,F
+0CC4:  BTFSC  03,2
+0CC5:  GOTO   71D
+0CC6:  INCF   53,W
+0CC7:  BTFSS  03,2
+0CC8:  GOTO   71D
+0CC9:  INCF   54,W
+0CCA:  BTFSS  03,2
+0CCB:  GOTO   71D
+....................     { 
+....................         if (ipcol==PCOL_ICMP && get_ping_req())     // Ping request? 
+0CCC:  MOVLW  01
+0CCD:  SUBWF  29,W
+0CCE:  BTFSS  03,2
+0CCF:  GOTO   5AF
+*
+0D15:  MOVF   78,F
+0D16:  BTFSC  03,2
+0D17:  GOTO   5AF
+....................         { 
+....................             tpdlen = rpdlen;                        // Tx length = Rx length 
+0D18:  MOVF   45,W
+0D19:  MOVWF  47
+0D1A:  MOVF   44,W
+0D1B:  MOVWF  46
+....................             if (!txflag) 
+0D1C:  BTFSC  4B,1
+0D1D:  GOTO   5AE
+....................             { 
+....................                 put_ip(tpdlen+ICMPHDR_LEN);         // Send ping reply 
+0D1E:  MOVLW  04
+0D1F:  ADDWF  46,W
+0D20:  BSF    03,5
+0D21:  BSF    03,6
+0D22:  MOVWF  15
+0D23:  MOVLW  00
+0D24:  BTFSC  03,0
+0D25:  ADDLW  01
+0D26:  BCF    03,5
+0D27:  BCF    03,6
+0D28:  ADDWF  47,W
+0D29:  BSF    03,5
+0D2A:  BSF    03,6
+0D2B:  MOVWF  16
+0D2C:  MOVF   16,W
+0D2D:  MOVWF  21
+0D2E:  MOVF   15,W
+0D2F:  MOVWF  20
+0D30:  BCF    03,5
+0D31:  BCF    03,6
+0D32:  CALL   0DB
+....................                 put_ping_rep(); 
+....................             } 
+....................         } 
+....................         else if (ipcol==PCOL_TCP && get_tcp())      // TCP segment? 
+*
+0DAE:  GOTO   71C
+0DAF:  MOVLW  06
+0DB0:  SUBWF  29,W
+0DB1:  BTFSS  03,2
+0DB2:  GOTO   71B
+*
+0F12:  MOVF   78,F
+0F13:  BTFSC  03,2
+0F14:  GOTO   71B
+....................             tcp_rx();                               // Call TCP handler 
+0F15:  BSF    0A,4
+0F16:  BCF    0A,3
+0F17:  GOTO   000
+0F18:  BCF    0A,4
+0F19:  BSF    0A,3
+....................         else 
+0F1A:  GOTO   71C
+....................             discard_data();                         // Unknown; discard it 
+0F1B:  CALL   34A
+....................     } 
+....................     else 
+0F1C:  GOTO   71E
+....................         discard_data(); 
+0F1D:  CALL   34A
+....................     return(ret); 
+0F1E:  MOVLW  00
+0F1F:  BSF    03,5
+0F20:  BSF    03,6
+0F21:  BTFSC  14,0
+0F22:  MOVLW  01
+0F23:  BCF    03,5
+0F24:  BCF    03,6
+0F25:  MOVWF  78
+.................... } 
+....................  
+.................... /* Handle an incoming TCP segment */ 
+.................... #separate 
+.................... void tcp_rx(void) 
+.................... { 
+....................     BYTE *p, *q; 
+*
+1000:  BSF    03,5
+1001:  BSF    03,6
+1002:  BSF    19,0
+....................     BOOL tx=1; 
+....................  
+....................     tpdlen = 0;                         // Assume no Tx data 
+1003:  BCF    03,5
+1004:  BCF    03,6
+1005:  CLRF   47
+1006:  CLRF   46
+....................     tflags = TACK;                      // ..and just sending an ack 
+1007:  MOVLW  10
+1008:  MOVWF  41
+....................     if (txflag || (rflags & TRST))      // RESET received, or busy? 
+1009:  BTFSC  4B,1
+100A:  GOTO   010
+100B:  MOVF   40,W
+100C:  ANDLW  04
+100D:  IORLW  00
+100E:  BTFSC  03,2
+100F:  GOTO   016
+....................         tx = 0;                         //..do nothing 
+1010:  BSF    03,5
+1011:  BSF    03,6
+1012:  BCF    19,0
+....................     else if (rflags & TSYN)             // SYN received? 
+1013:  BCF    03,5
+1014:  BCF    03,6
+1015:  GOTO   74F
+1016:  MOVF   40,W
+1017:  ANDLW  02
+1018:  IORLW  00
+1019:  BTFSC  03,2
+101A:  GOTO   043
+....................     { 
+....................         inc_lword(rseq.l);              // Adjust Tx ack for SYN 
+....................         if (locport==DAYPORT || locport==HTTPORT) 
+*
+1022:  MOVF   33,F
+1023:  BTFSS  03,2
+1024:  GOTO   029
+1025:  MOVLW  0D
+1026:  SUBWF  32,W
+1027:  BTFSC  03,2
+1028:  GOTO   030
+1029:  MOVF   33,F
+102A:  BTFSS  03,2
+102B:  GOTO   040
+102C:  MOVLW  50
+102D:  SUBWF  32,W
+102E:  BTFSS  03,2
+102F:  GOTO   040
+....................         {                               // Recognised port? 
+....................             rack.w[0] = 0xffff; 
+1030:  MOVLW  FF
+1031:  MOVWF  3B
+1032:  MOVLW  FF
+1033:  MOVWF  3A
+....................             rack.w[1] = concount++; 
+1034:  MOVF   3F,W
+1035:  MOVWF  7A
+1036:  MOVF   3E,W
+1037:  INCF   3E,F
+1038:  BTFSC  03,2
+1039:  INCF   3F,F
+103A:  MOVWF  3C
+103B:  MOVF   7A,W
+103C:  MOVWF  3D
+....................             tflags = TSYN+TACK;         // Send SYN ACK 
+103D:  MOVLW  12
+103E:  MOVWF  41
+....................         } 
+....................         else                            // Unrecognised port? 
+103F:  GOTO   042
+....................             tflags = TRST+TACK;         // Send reset 
+1040:  MOVLW  14
+1041:  MOVWF  41
+....................     } 
+....................     else if (rflags & TFIN)             // Received FIN? 
+1042:  GOTO   74F
+1043:  MOVF   40,W
+1044:  ANDLW  01
+1045:  IORLW  00
+1046:  BTFSC  03,2
+1047:  GOTO   082
+....................         add_lword(rseq.l, rpdlen+1);    // Ack all incoming data + FIN 
+1048:  MOVLW  01
+1049:  ADDWF  44,W
+104A:  BSF    03,5
+104B:  BSF    03,6
+104C:  MOVWF  1A
+104D:  MOVLW  00
+104E:  BTFSC  03,0
+104F:  ADDLW  01
+1050:  BCF    03,5
+1051:  BCF    03,6
+1052:  ADDWF  45,W
+1053:  BSF    03,5
+1054:  BSF    03,6
+1055:  MOVWF  1B
+1056:  MOVF   1B,W
+1057:  MOVWF  1D
+1058:  MOVF   1A,W
+1059:  MOVWF  1C
+....................     else if (rflags & TACK)             // ACK received? 
+*
+1081:  GOTO   74F
+1082:  MOVF   40,W
+1083:  ANDLW  10
+1084:  IORLW  00
+1085:  BTFSC  03,2
+1086:  GOTO   74F
+....................     { 
+....................         if (rpdlen)                     // Adjust Tx ack for Rx data 
+1087:  MOVF   44,W
+1088:  IORWF  45,W
+1089:  BTFSC  03,2
+108A:  GOTO   0BD
+....................             add_lword(rseq.l, rpdlen); 
+108B:  MOVF   45,W
+108C:  BSF    03,5
+108D:  BSF    03,6
+108E:  MOVWF  1D
+108F:  BCF    03,5
+1090:  BCF    03,6
+1091:  MOVF   44,W
+1092:  BSF    03,5
+1093:  BSF    03,6
+1094:  MOVWF  1C
+....................         else                            // If no data, don't send ack 
+*
+10BC:  GOTO   0C2
+....................             tx = 0; 
+10BD:  BSF    03,5
+10BE:  BSF    03,6
+10BF:  BCF    19,0
+10C0:  BCF    03,5
+10C1:  BCF    03,6
+....................         if (locport==DAYPORT && rack.w[0]==0) 
+10C2:  MOVF   33,F
+10C3:  BTFSS  03,2
+10C4:  GOTO   155
+10C5:  MOVLW  0D
+10C6:  SUBWF  32,W
+10C7:  BTFSS  03,2
+10C8:  GOTO   155
+10C9:  MOVF   3B,F
+10CA:  BTFSS  03,2
+10CB:  GOTO   155
+10CC:  MOVF   3A,F
+10CD:  BTFSS  03,2
+10CE:  GOTO   155
+....................         {                               // Daytime request? 
+....................             daytime_rx();               // Send daytime data 
+....................             tx = 0; 
+*
+114F:  BSF    03,5
+1150:  BSF    03,6
+1151:  BCF    19,0
+....................         } 
+....................         else if (locport==HTTPORT && rpdlen) 
+1152:  BCF    03,5
+1153:  BCF    03,6
+1154:  GOTO   74F
+1155:  MOVF   33,F
+1156:  BTFSS  03,2
+1157:  GOTO   74F
+1158:  MOVLW  50
+1159:  SUBWF  32,W
+115A:  BTFSS  03,2
+115B:  GOTO   74F
+115C:  MOVF   44,W
+115D:  IORWF  45,W
+115E:  BTFSC  03,2
+115F:  GOTO   74F
+....................         {                               // HTTP 'get' method? 
+....................             if (http_rx())              // Send HTTP data & close 
+*
+1744:  MOVF   78,F
+1745:  BTFSC  03,2
+1746:  GOTO   74D
+....................                 tx = 0; 
+1747:  BSF    03,5
+1748:  BSF    03,6
+1749:  BCF    19,0
+....................             else                        // ..or just close connection 
+174A:  BCF    03,5
+174B:  BCF    03,6
+174C:  GOTO   74F
+....................                 tflags = TFIN+TACK; 
+174D:  MOVLW  11
+174E:  MOVWF  41
+....................         } 
+....................     } 
+....................     if (tx)                             // If ack to send.. 
+174F:  BSF    03,5
+1750:  BSF    03,6
+1751:  BTFSC  19,0
+1752:  GOTO   756
+1753:  BCF    03,5
+1754:  BCF    03,6
+1755:  GOTO   76C
+1756:  BCF    03,5
+1757:  BCF    03,6
+....................     { 
+....................         put_ip(TCPHDR_LEN);             // ..send IP header 
+1758:  BSF    03,5
+1759:  BSF    03,6
+175A:  CLRF   21
+175B:  MOVLW  14
+175C:  MOVWF  20
+175D:  BCF    03,5
+175E:  BCF    03,6
+175F:  BCF    0A,4
+1760:  BSF    0A,3
+1761:  CALL   0DB
+1762:  BSF    0A,4
+1763:  BCF    0A,3
+....................         checkhi = checklo = 0;          // ..reset checksum 
+1764:  CLRF   54
+1765:  MOVF   54,W
+1766:  MOVWF  53
+....................         put_tcp();                      // ..send TCP header 
+1767:  BCF    0A,4
+1768:  BSF    0A,3
+1769:  CALL   1FB
+176A:  BSF    0A,4
+176B:  BCF    0A,3
+....................     } 
+176C:  BSF    0A,3
+176D:  BCF    0A,4
+176E:  GOTO   718
+.................... } 
+....................  
+.................... /* Handle an incoming daytime request */ 
+.................... void daytime_rx() 
+.................... { 
+....................     tpdlen = DAYTIME_LEN;               // Data length of response 
+*
+10CF:  CLRF   47
+10D0:  MOVLW  0A
+10D1:  MOVWF  46
+....................     get_rtc_time();                     // Read clock 
+10D2:  BCF    0A,4
+10D3:  CALL   293
+10D4:  BSF    0A,4
+....................     put_ip(TCPHDR_LEN+tpdlen);          // Send IP header 
+10D5:  MOVLW  14
+10D6:  ADDWF  46,W
+10D7:  BSF    03,5
+10D8:  BSF    03,6
+10D9:  MOVWF  1A
+10DA:  MOVLW  00
+10DB:  BTFSC  03,0
+10DC:  ADDLW  01
+10DD:  BCF    03,5
+10DE:  BCF    03,6
+10DF:  ADDWF  47,W
+10E0:  BSF    03,5
+10E1:  BSF    03,6
+10E2:  MOVWF  1B
+10E3:  MOVF   1B,W
+10E4:  MOVWF  21
+10E5:  MOVF   1A,W
+10E6:  MOVWF  20
+10E7:  BCF    03,5
+10E8:  BCF    03,6
+10E9:  BCF    0A,4
+10EA:  BSF    0A,3
+10EB:  CALL   0DB
+10EC:  BSF    0A,4
+10ED:  BCF    0A,3
+....................     checkhi = checklo = 0;              // Reset checksum 
+10EE:  CLRF   54
+10EF:  MOVF   54,W
+10F0:  MOVWF  53
+....................     txin = IPHDR_LEN + TCPHDR_LEN;      // O/P data to buffer, calc checksum 
+10F1:  MOVLW  28
+10F2:  MOVWF  4C
+....................     printf(put_byte, DAYTIME_STR, rtc.b[2], rtc.b[1], rtc.b[0]); 
+*
+09A6:  BSF    03,5
+09A7:  BSF    03,6
+09A8:  BTFSS  1F,7
+09A9:  GOTO   1AD
+09AA:  BCF    03,5
+09AB:  BCF    03,6
+09AC:  GOTO   1CB
+09AD:  MOVLW  0F
+09AE:  BCF    03,5
+09AF:  BCF    03,6
+09B0:  MOVWF  77
+09B1:  BSF    03,5
+09B2:  BSF    03,6
+09B3:  SWAPF  1E,W
+09B4:  BCF    03,5
+09B5:  BCF    03,6
+09B6:  ANDWF  77,F
+09B7:  MOVLW  0A
+09B8:  SUBWF  77,W
+09B9:  BTFSC  03,0
+09BA:  GOTO   1BE
+09BB:  MOVLW  30
+09BC:  ADDWF  77,F
+09BD:  GOTO   1C4
+09BE:  BSF    03,5
+09BF:  BSF    03,6
+09C0:  MOVF   1F,W
+09C1:  BCF    03,5
+09C2:  BCF    03,6
+09C3:  ADDWF  77,F
+09C4:  MOVF   77,W
+09C5:  BSF    03,5
+09C6:  BSF    03,6
+09C7:  MOVWF  26
+09C8:  BCF    03,5
+09C9:  BCF    03,6
+09CA:  CALL   0AF
+09CB:  MOVLW  0F
+09CC:  BSF    03,5
+09CD:  BSF    03,6
+09CE:  ANDWF  1E,F
+09CF:  MOVLW  0A
+09D0:  SUBWF  1E,W
+09D1:  BTFSS  03,0
+09D2:  GOTO   1D6
+09D3:  BCF    03,5
+09D4:  BCF    03,6
+09D5:  GOTO   1DA
+09D6:  MOVLW  30
+09D7:  BCF    03,5
+09D8:  BCF    03,6
+09D9:  GOTO   1E0
+09DA:  BSF    03,5
+09DB:  BSF    03,6
+09DC:  BCF    1F,7
+09DD:  MOVF   1F,W
+09DE:  BCF    03,5
+09DF:  BCF    03,6
+09E0:  BSF    03,5
+09E1:  BSF    03,6
+09E2:  ADDWF  1E,F
+09E3:  MOVF   1E,W
+09E4:  MOVWF  26
+09E5:  BCF    03,5
+09E6:  BCF    03,6
+09E7:  CALL   0AF
+09E8:  RETLW  00
+*
+10F3:  MOVF   72,W
+10F4:  BSF    03,5
+10F5:  BSF    03,6
+10F6:  MOVWF  1E
+10F7:  MOVLW  57
+10F8:  MOVWF  1F
+10F9:  BCF    03,5
+10FA:  BCF    03,6
+10FB:  BCF    0A,4
+10FC:  BSF    0A,3
+10FD:  CALL   1A6
+10FE:  BSF    0A,4
+10FF:  BCF    0A,3
+1100:  MOVLW  3A
+1101:  BSF    03,5
+1102:  BSF    03,6
+1103:  MOVWF  26
+1104:  BCF    03,5
+1105:  BCF    03,6
+1106:  BCF    0A,4
+1107:  BSF    0A,3
+1108:  CALL   0AF
+1109:  BSF    0A,4
+110A:  BCF    0A,3
+110B:  MOVF   71,W
+110C:  BSF    03,5
+110D:  BSF    03,6
+110E:  MOVWF  1E
+110F:  MOVLW  57
+1110:  MOVWF  1F
+1111:  BCF    03,5
+1112:  BCF    03,6
+1113:  BCF    0A,4
+1114:  BSF    0A,3
+1115:  CALL   1A6
+1116:  BSF    0A,4
+1117:  BCF    0A,3
+1118:  MOVLW  3A
+1119:  BSF    03,5
+111A:  BSF    03,6
+111B:  MOVWF  26
+111C:  BCF    03,5
+111D:  BCF    03,6
+111E:  BCF    0A,4
+111F:  BSF    0A,3
+1120:  CALL   0AF
+1121:  BSF    0A,4
+1122:  BCF    0A,3
+1123:  MOVF   70,W
+1124:  BSF    03,5
+1125:  BSF    03,6
+1126:  MOVWF  1E
+1127:  MOVLW  57
+1128:  MOVWF  1F
+1129:  BCF    03,5
+112A:  BCF    03,6
+112B:  BCF    0A,4
+112C:  BSF    0A,3
+112D:  CALL   1A6
+112E:  BSF    0A,4
+112F:  BCF    0A,3
+1130:  MOVLW  0D
+1131:  BSF    03,5
+1132:  BSF    03,6
+1133:  MOVWF  26
+1134:  BCF    03,5
+1135:  BCF    03,6
+1136:  BCF    0A,4
+1137:  BSF    0A,3
+1138:  CALL   0AF
+1139:  BSF    0A,4
+113A:  BCF    0A,3
+113B:  MOVLW  0A
+113C:  BSF    03,5
+113D:  BSF    03,6
+113E:  MOVWF  26
+113F:  BCF    03,5
+1140:  BCF    03,6
+1141:  BCF    0A,4
+1142:  BSF    0A,3
+1143:  CALL   0AF
+1144:  BSF    0A,4
+1145:  BCF    0A,3
+....................     txin = IPHDR_LEN;                   // Go back to end of IP header 
+1146:  MOVLW  14
+1147:  MOVWF  4C
+....................     tflags = TFIN+TACK;                 // O/P TCP header 
+1148:  MOVLW  11
+1149:  MOVWF  41
+....................     put_tcp(); 
+114A:  BCF    0A,4
+114B:  BSF    0A,3
+114C:  CALL   1FB
+114D:  BSF    0A,4
+114E:  BCF    0A,3
+.................... } 
+....................  
+.................... /* Receive an incoming HTTP request ('method'), return 0 if invalid */ 
+.................... BOOL http_rx(void) 
+.................... { 
+....................     int len, i; 
+....................     BOOL ret=0; 
+*
+1160:  BSF    03,5
+1161:  BSF    03,6
+1162:  BCF    1C,0
+....................     char c; 
+....................  
+....................     tpdlen = 0;                         // Check for 'GET' 
+1163:  BCF    03,5
+1164:  BCF    03,6
+1165:  CLRF   47
+1166:  CLRF   46
+....................     if (match_byte('G') && match_byte('E') && match_byte('T')) 
+1167:  MOVLW  47
+1168:  BSF    03,5
+1169:  BSF    03,6
+116A:  MOVWF  2B
+116B:  BCF    03,5
+116C:  BCF    03,6
+116D:  BCF    0A,4
+116E:  BSF    0A,3
+116F:  CALL   095
+1170:  BSF    0A,4
+1171:  BCF    0A,3
+1172:  MOVF   78,F
+1173:  BTFSC  03,2
+1174:  GOTO   73C
+1175:  MOVLW  45
+1176:  BSF    03,5
+1177:  BSF    03,6
+1178:  MOVWF  2B
+1179:  BCF    03,5
+117A:  BCF    03,6
+117B:  BCF    0A,4
+117C:  BSF    0A,3
+117D:  CALL   095
+117E:  BSF    0A,4
+117F:  BCF    0A,3
+1180:  MOVF   78,F
+1181:  BTFSC  03,2
+1182:  GOTO   73C
+1183:  MOVLW  54
+1184:  BSF    03,5
+1185:  BSF    03,6
+1186:  MOVWF  2B
+1187:  BCF    03,5
+1188:  BCF    03,6
+1189:  BCF    0A,4
+118A:  BSF    0A,3
+118B:  CALL   095
+118C:  BSF    0A,4
+118D:  BCF    0A,3
+118E:  MOVF   78,F
+118F:  BTFSC  03,2
+1190:  GOTO   73C
+....................     { 
+....................         ret = 1; 
+1191:  BSF    03,5
+1192:  BSF    03,6
+1193:  BSF    1C,0
+1194:  BCF    03,5
+1195:  BCF    03,6
+....................         skip_space(); 
+....................         match_byte('/');                // Start of filename 
+*
+11A4:  MOVLW  2F
+11A5:  BSF    03,5
+11A6:  BSF    03,6
+11A7:  MOVWF  2B
+11A8:  BCF    03,5
+11A9:  BCF    03,6
+11AA:  BCF    0A,4
+11AB:  BSF    0A,3
+11AC:  CALL   095
+11AD:  BSF    0A,4
+11AE:  BCF    0A,3
+....................         if (rxbuff[rxout] == '$')       // If dummy file starting wth '$' 
+11AF:  MOVLW  A0
+11B0:  ADDWF  51,W
+11B1:  MOVWF  04
+11B2:  BCF    03,7
+11B3:  MOVLW  24
+11B4:  SUBWF  00,W
+11B5:  BTFSS  03,2
+11B6:  GOTO   25B
+....................         { 
+....................                                         // ..put out simple text string 
+....................             tpdlen = TEXT_OK_LEN + DAYTIME_LEN; 
+11B7:  CLRF   47
+11B8:  MOVLW  37
+11B9:  MOVWF  46
+....................             get_rtc_time();             // ..consisting of current time 
+11BA:  BCF    0A,4
+11BB:  CALL   293
+11BC:  BSF    0A,4
+....................             put_ip(TCPHDR_LEN+tpdlen); 
+11BD:  MOVLW  14
+11BE:  ADDWF  46,W
+11BF:  BSF    03,5
+11C0:  BSF    03,6
+11C1:  MOVWF  1E
+11C2:  MOVLW  00
+11C3:  BTFSC  03,0
+11C4:  ADDLW  01
+11C5:  BCF    03,5
+11C6:  BCF    03,6
+11C7:  ADDWF  47,W
+11C8:  BSF    03,5
+11C9:  BSF    03,6
+11CA:  MOVWF  1F
+11CB:  MOVF   1F,W
+11CC:  MOVWF  21
+11CD:  MOVF   1E,W
+11CE:  MOVWF  20
+11CF:  BCF    03,5
+11D0:  BCF    03,6
+11D1:  BCF    0A,4
+11D2:  BSF    0A,3
+11D3:  CALL   0DB
+11D4:  BSF    0A,4
+11D5:  BCF    0A,3
+....................             checkhi = checklo = 0; 
+11D6:  CLRF   54
+11D7:  MOVF   54,W
+11D8:  MOVWF  53
+....................             txin = IPHDR_LEN + TCPHDR_LEN; 
+11D9:  MOVLW  28
+11DA:  MOVWF  4C
+....................             printf(put_byte, TEXT_OK);  // ..with HTTP header 
+*
+0036:  BCF    0A,0
+0037:  BCF    0A,1
+0038:  BCF    0A,2
+0039:  ADDWF  02,F
+003A:  RETLW  48
+003B:  RETLW  54
+003C:  RETLW  54
+003D:  RETLW  50
+003E:  RETLW  2F
+003F:  RETLW  31
+0040:  RETLW  2E
+0041:  RETLW  30
+0042:  RETLW  20
+0043:  RETLW  32
+0044:  RETLW  30
+0045:  RETLW  30
+0046:  RETLW  20
+0047:  RETLW  4F
+0048:  RETLW  4B
+0049:  RETLW  0D
+004A:  RETLW  0A
+004B:  RETLW  43
+004C:  RETLW  6F
+004D:  RETLW  6E
+004E:  RETLW  74
+004F:  RETLW  65
+0050:  RETLW  6E
+0051:  RETLW  74
+0052:  RETLW  2D
+0053:  RETLW  74
+0054:  RETLW  79
+0055:  RETLW  70
+0056:  RETLW  65
+0057:  RETLW  3A
+0058:  RETLW  20
+0059:  RETLW  74
+005A:  RETLW  65
+005B:  RETLW  78
+005C:  RETLW  74
+005D:  RETLW  2F
+005E:  RETLW  70
+005F:  RETLW  6C
+0060:  RETLW  61
+0061:  RETLW  69
+0062:  RETLW  6E
+0063:  RETLW  0D
+0064:  RETLW  0A
+0065:  RETLW  0D
+0066:  RETLW  0A
+0067:  RETLW  00
+*
+11DB:  BSF    03,5
+11DC:  BSF    03,6
+11DD:  CLRF   1E
+11DE:  BCF    03,5
+11DF:  BCF    03,6
+11E0:  BSF    03,5
+11E1:  BSF    03,6
+11E2:  MOVF   1E,W
+11E3:  BCF    03,5
+11E4:  BCF    03,6
+11E5:  BCF    0A,4
+11E6:  CALL   036
+11E7:  BSF    0A,4
+11E8:  BSF    03,5
+11E9:  BSF    03,6
+11EA:  INCF   1E,F
+11EB:  MOVWF  26
+11EC:  BCF    03,5
+11ED:  BCF    03,6
+11EE:  BCF    0A,4
+11EF:  BSF    0A,3
+11F0:  CALL   0AF
+11F1:  BSF    0A,4
+11F2:  BCF    0A,3
+11F3:  MOVLW  2D
+11F4:  BSF    03,5
+11F5:  BSF    03,6
+11F6:  SUBWF  1E,W
+11F7:  BTFSC  03,2
+11F8:  GOTO   1FC
+11F9:  BCF    03,5
+11FA:  BCF    03,6
+11FB:  GOTO   1E0
+....................             printf(put_byte, DAYTIME_STR, rtc.b[2], rtc.b[1], rtc.b[0]); 
+11FC:  BCF    03,5
+11FD:  BCF    03,6
+11FE:  MOVF   72,W
+11FF:  BSF    03,5
+1200:  BSF    03,6
+1201:  MOVWF  1E
+1202:  MOVLW  57
+1203:  MOVWF  1F
+1204:  BCF    03,5
+1205:  BCF    03,6
+1206:  BCF    0A,4
+1207:  BSF    0A,3
+1208:  CALL   1A6
+1209:  BSF    0A,4
+120A:  BCF    0A,3
+120B:  MOVLW  3A
+120C:  BSF    03,5
+120D:  BSF    03,6
+120E:  MOVWF  26
+120F:  BCF    03,5
+1210:  BCF    03,6
+1211:  BCF    0A,4
+1212:  BSF    0A,3
+1213:  CALL   0AF
+1214:  BSF    0A,4
+1215:  BCF    0A,3
+1216:  MOVF   71,W
+1217:  BSF    03,5
+1218:  BSF    03,6
+1219:  MOVWF  1E
+121A:  MOVLW  57
+121B:  MOVWF  1F
+121C:  BCF    03,5
+121D:  BCF    03,6
+121E:  BCF    0A,4
+121F:  BSF    0A,3
+1220:  CALL   1A6
+1221:  BSF    0A,4
+1222:  BCF    0A,3
+1223:  MOVLW  3A
+1224:  BSF    03,5
+1225:  BSF    03,6
+1226:  MOVWF  26
+1227:  BCF    03,5
+1228:  BCF    03,6
+1229:  BCF    0A,4
+122A:  BSF    0A,3
+122B:  CALL   0AF
+122C:  BSF    0A,4
+122D:  BCF    0A,3
+122E:  MOVF   70,W
+122F:  BSF    03,5
+1230:  BSF    03,6
+1231:  MOVWF  1E
+1232:  MOVLW  57
+1233:  MOVWF  1F
+1234:  BCF    03,5
+1235:  BCF    03,6
+1236:  BCF    0A,4
+1237:  BSF    0A,3
+1238:  CALL   1A6
+1239:  BSF    0A,4
+123A:  BCF    0A,3
+123B:  MOVLW  0D
+123C:  BSF    03,5
+123D:  BSF    03,6
+123E:  MOVWF  26
+123F:  BCF    03,5
+1240:  BCF    03,6
+1241:  BCF    0A,4
+1242:  BSF    0A,3
+1243:  CALL   0AF
+1244:  BSF    0A,4
+1245:  BCF    0A,3
+1246:  MOVLW  0A
+1247:  BSF    03,5
+1248:  BSF    03,6
+1249:  MOVWF  26
+124A:  BCF    03,5
+124B:  BCF    03,6
+124C:  BCF    0A,4
+124D:  BSF    0A,3
+124E:  CALL   0AF
+124F:  BSF    0A,4
+1250:  BCF    0A,3
+....................             txin = IPHDR_LEN; 
+1251:  MOVLW  14
+1252:  MOVWF  4C
+....................             tflags = TFIN+TPUSH+TACK; 
+1253:  MOVLW  19
+1254:  MOVWF  41
+....................             put_tcp(); 
+1255:  BCF    0A,4
+1256:  BSF    0A,3
+1257:  CALL   1FB
+1258:  BSF    0A,4
+1259:  BCF    0A,3
+....................         } 
+....................         else 
+125A:  GOTO   73C
+....................         {                               // Get filename into directory buffer 
+....................             for (i=0; i<ROM_FNAMELEN; i++) 
+125B:  BSF    03,5
+125C:  BSF    03,6
+125D:  CLRF   1B
+125E:  BCF    03,5
+125F:  BCF    03,6
+1260:  MOVLW  0C
+1261:  BSF    03,5
+1262:  BSF    03,6
+1263:  SUBWF  1B,W
+1264:  BTFSS  03,0
+1265:  GOTO   269
+1266:  BCF    03,5
+1267:  BCF    03,6
+1268:  GOTO   2A5
+1269:  BCF    03,5
+126A:  BCF    03,6
+....................             { 
+....................                 c = rxbuff[rxout]; 
+126B:  MOVLW  A0
+126C:  ADDWF  51,W
+126D:  MOVWF  04
+126E:  BCF    03,7
+126F:  MOVF   00,W
+1270:  BSF    03,5
+1271:  BSF    03,6
+1272:  MOVWF  1D
+....................                 if (c>' ' && c!='?')    // Name terminated by space or '?' 
+1273:  MOVLW  21
+1274:  SUBWF  1D,W
+1275:  BTFSC  03,0
+1276:  GOTO   27A
+1277:  BCF    03,5
+1278:  BCF    03,6
+1279:  GOTO   289
+127A:  BCF    03,5
+127B:  BCF    03,6
+127C:  MOVLW  3F
+127D:  BSF    03,5
+127E:  BSF    03,6
+127F:  SUBWF  1D,W
+1280:  BTFSS  03,2
+1281:  GOTO   285
+1282:  BCF    03,5
+1283:  BCF    03,6
+1284:  GOTO   289
+1285:  BCF    03,5
+1286:  BCF    03,6
+....................                     rxout++; 
+1287:  INCF   51,F
+....................                 else 
+1288:  GOTO   28E
+....................                     c = 0; 
+1289:  BSF    03,5
+128A:  BSF    03,6
+128B:  CLRF   1D
+128C:  BCF    03,5
+128D:  BCF    03,6
+....................                 romdir.f.name[i] = c; 
+128E:  MOVLW  07
+128F:  BSF    03,5
+1290:  BSF    03,6
+1291:  ADDWF  1B,W
+1292:  BCF    03,5
+1293:  BCF    03,6
+1294:  MOVWF  77
+1295:  MOVLW  5C
+1296:  ADDWF  77,W
+1297:  MOVWF  04
+1298:  BCF    03,7
+1299:  BSF    03,5
+129A:  BSF    03,6
+129B:  MOVF   1D,W
+129C:  MOVWF  00
+129D:  BCF    03,5
+129E:  BCF    03,6
+....................             }                           // If file found in ROM 
+129F:  BSF    03,5
+12A0:  BSF    03,6
+12A1:  INCF   1B,F
+12A2:  BCF    03,5
+12A3:  BCF    03,6
+12A4:  GOTO   260
+....................             if (find_file()) 
+12A5:  BCF    0A,4
+12A6:  CALL   6CD
+12A7:  BSF    0A,4
+12A8:  MOVF   78,F
+12A9:  BTFSC  03,2
+12AA:  GOTO   67C
+....................             {                           // ..check for form arguments 
+....................                 check_formargs(); 
+....................             } 
+....................             else                        // File not found, get index.htm 
+*
+167B:  GOTO   680
+....................             { 
+....................                 romdir.f.name[0] = 0; 
+167C:  CLRF   63
+....................                 find_file(); 
+167D:  BCF    0A,4
+167E:  CALL   6CD
+167F:  BSF    0A,4
+....................             } 
+....................             if (!fileidx)               // No files at all in ROM - disaster! 
+1680:  MOVF   6F,F
+1681:  BTFSS  03,2
+1682:  GOTO   6F9
+....................             { 
+....................                 tpdlen = HTTP_FAIL_LEN;     // Inform user of failure.. 
+1683:  CLRF   47
+1684:  MOVLW  22
+1685:  MOVWF  46
+....................                 put_ip(TCPHDR_LEN+tpdlen);  // Output IP header to buffer 
+1686:  MOVLW  14
+1687:  ADDWF  46,W
+1688:  BSF    03,5
+1689:  BSF    03,6
+168A:  MOVWF  1E
+168B:  MOVLW  00
+168C:  BTFSC  03,0
+168D:  ADDLW  01
+168E:  BCF    03,5
+168F:  BCF    03,6
+1690:  ADDWF  47,W
+1691:  BSF    03,5
+1692:  BSF    03,6
+1693:  MOVWF  1F
+1694:  MOVF   1F,W
+1695:  MOVWF  21
+1696:  MOVF   1E,W
+1697:  MOVWF  20
+1698:  BCF    03,5
+1699:  BCF    03,6
+169A:  BCF    0A,4
+169B:  BSF    0A,3
+169C:  CALL   0DB
+169D:  BSF    0A,4
+169E:  BCF    0A,3
+....................                 checkhi = checklo = 0;      // Reset checksum 
+169F:  CLRF   54
+16A0:  MOVF   54,W
+16A1:  MOVWF  53
+....................                 strcpy(&txbuff[IPHDR_LEN+TCPHDR_LEN], HTTP_FAIL); 
+*
+0068:  BCF    0A,0
+0069:  BCF    0A,1
+006A:  BCF    0A,2
+006B:  ADDWF  02,F
+006C:  RETLW  48
+006D:  RETLW  54
+006E:  RETLW  54
+006F:  RETLW  50
+0070:  RETLW  2F
+0071:  RETLW  20
+0072:  RETLW  32
+0073:  RETLW  30
+0074:  RETLW  30
+0075:  RETLW  20
+0076:  RETLW  4F
+0077:  RETLW  4B
+0078:  RETLW  0D
+0079:  RETLW  0A
+007A:  RETLW  0D
+007B:  RETLW  0A
+007C:  RETLW  50
+007D:  RETLW  49
+007E:  RETLW  43
+007F:  RETLW  57
+0080:  RETLW  45
+0081:  RETLW  42
+0082:  RETLW  20
+0083:  RETLW  52
+0084:  RETLW  4F
+0085:  RETLW  4D
+0086:  RETLW  20
+0087:  RETLW  65
+0088:  RETLW  72
+0089:  RETLW  72
+008A:  RETLW  6F
+008B:  RETLW  72
+008C:  RETLW  0D
+008D:  RETLW  0A
+008E:  RETLW  00
+*
+16A2:  BSF    03,5
+16A3:  BSF    03,6
+16A4:  CLRF   1E
+16A5:  BCF    03,5
+16A6:  BCF    03,6
+16A7:  MOVLW  38
+16A8:  MOVWF  04
+16A9:  BSF    03,7
+16AA:  BSF    03,5
+16AB:  BSF    03,6
+16AC:  MOVF   1E,W
+16AD:  ADDWF  04,F
+16AE:  MOVF   1E,W
+16AF:  BCF    03,5
+16B0:  BCF    03,6
+16B1:  BCF    0A,4
+16B2:  CALL   068
+16B3:  BSF    0A,4
+16B4:  MOVWF  00
+16B5:  IORLW  00
+16B6:  BTFSC  03,2
+16B7:  GOTO   6BE
+16B8:  BSF    03,5
+16B9:  BSF    03,6
+16BA:  INCF   1E,F
+16BB:  BCF    03,5
+16BC:  BCF    03,6
+16BD:  GOTO   6A7
+....................                 txin = IPHDR_LEN + TCPHDR_LEN; 
+16BE:  MOVLW  28
+16BF:  MOVWF  4C
+....................                 check_txbytes(tpdlen);      // Checksum data 
+16C0:  MOVF   46,W
+16C1:  BSF    03,5
+16C2:  BSF    03,6
+16C3:  MOVWF  1E
+16C4:  BCF    03,5
+16C5:  BCF    03,6
+....................                 txin = IPHDR_LEN;           // Go back to end of IP header 
+*
+16EF:  MOVLW  14
+16F0:  MOVWF  4C
+....................                 tflags = TFIN+TPUSH+TACK; 
+16F1:  MOVLW  19
+16F2:  MOVWF  41
+....................                 put_tcp();                  // Output TCP header to buffer 
+16F3:  BCF    0A,4
+16F4:  BSF    0A,3
+16F5:  CALL   1FB
+16F6:  BSF    0A,4
+16F7:  BCF    0A,3
+....................             } 
+....................             else                        // File found OK 
+16F8:  GOTO   73C
+....................             { 
+....................                 tpdlen = romdir.f.len;      // Get TCP data length 
+16F9:  MOVF   5D,W
+16FA:  MOVWF  47
+16FB:  MOVF   5C,W
+16FC:  MOVWF  46
+....................                 put_ip(TCPHDR_LEN+tpdlen);  // Output IP header to buffer 
+16FD:  MOVLW  14
+16FE:  ADDWF  46,W
+16FF:  BSF    03,5
+1700:  BSF    03,6
+1701:  MOVWF  1E
+1702:  MOVLW  00
+1703:  BTFSC  03,0
+1704:  ADDLW  01
+1705:  BCF    03,5
+1706:  BCF    03,6
+1707:  ADDWF  47,W
+1708:  BSF    03,5
+1709:  BSF    03,6
+170A:  MOVWF  1F
+170B:  MOVF   1F,W
+170C:  MOVWF  21
+170D:  MOVF   1E,W
+170E:  MOVWF  20
+170F:  BCF    03,5
+1710:  BCF    03,6
+1711:  BCF    0A,4
+1712:  BSF    0A,3
+1713:  CALL   0DB
+1714:  BSF    0A,4
+1715:  BCF    0A,3
+....................                 checkhi = checklo = 0;      // Reset checksum 
+1716:  CLRF   54
+1717:  MOVF   54,W
+1718:  MOVWF  53
+....................                 check_byte(romdir.f.check); // Add on checksum on ROM file 
+1719:  MOVF   60,W
+171A:  BSF    03,5
+171B:  BSF    03,6
+171C:  MOVWF  2D
+171D:  BCF    03,5
+171E:  BCF    03,6
+171F:  BCF    0A,4
+1720:  BSF    0A,3
+1721:  CALL   046
+1722:  BSF    0A,4
+1723:  BCF    0A,3
+....................                 check_byte(romdir.f.check >> 8); 
+1724:  MOVF   61,W
+1725:  BSF    03,5
+1726:  BSF    03,6
+1727:  MOVWF  1E
+1728:  CLRF   1F
+1729:  MOVF   1E,W
+172A:  MOVWF  2D
+172B:  BCF    03,5
+172C:  BCF    03,6
+172D:  BCF    0A,4
+172E:  BSF    0A,3
+172F:  CALL   046
+1730:  BSF    0A,4
+1731:  BCF    0A,3
+....................                 tflags = TFIN+TPUSH+TACK;   // Close connection when sent 
+1732:  MOVLW  19
+1733:  MOVWF  41
+....................                 txi2c = 1;                  // Set flag to enable ROM file O/P 
+1734:  CLRF   4F
+1735:  MOVLW  01
+1736:  MOVWF  4E
+....................                 put_tcp();                  // Output TCP header to buffer 
+1737:  BCF    0A,4
+1738:  BSF    0A,3
+1739:  CALL   1FB
+173A:  BSF    0A,4
+173B:  BCF    0A,3
+....................             } 
+....................         } 
+....................     } 
+....................     return(ret); 
+173C:  MOVLW  00
+173D:  BSF    03,5
+173E:  BSF    03,6
+173F:  BTFSC  1C,0
+1740:  MOVLW  01
+1741:  BCF    03,5
+1742:  BCF    03,6
+1743:  MOVWF  78
+.................... } 
+....................  
+.................... /* Check for form arguments in HTTP request string */ 
+.................... void check_formargs(void) 
+.................... { 
+....................     BOOL update=0; 
+....................     char c, d, temps[5]; 
+*
+12AB:  BSF    03,5
+12AC:  BSF    03,6
+12AD:  BCF    1E,0
+.................... #if PORTBINV 
+....................     portval = ~PORTB;               // Read O/P port, just in case 
+.................... #else 
+....................     portval = PORTB; 
+12AE:  BCF    03,5
+12AF:  BCF    03,6
+12B0:  MOVF   06,W
+12B1:  MOVWF  48
+.................... #endif         
+....................     while (rxout < rxcount) 
+12B2:  MOVF   52,W
+12B3:  SUBWF  51,W
+12B4:  BTFSC  03,0
+12B5:  GOTO   61B
+....................     {                               // Each arg starts with '?' or '&' 
+....................         c = rxbuff[rxout++]; 
+12B6:  MOVF   51,W
+12B7:  INCF   51,F
+12B8:  MOVWF  77
+12B9:  MOVLW  A0
+12BA:  ADDWF  77,W
+12BB:  MOVWF  04
+12BC:  BCF    03,7
+12BD:  MOVF   00,W
+12BE:  BSF    03,5
+12BF:  BSF    03,6
+12C0:  MOVWF  1F
+....................         if (c=='?' || c=='&') 
+12C1:  MOVLW  3F
+12C2:  SUBWF  1F,W
+12C3:  BTFSS  03,2
+12C4:  GOTO   2C8
+12C5:  BCF    03,5
+12C6:  BCF    03,6
+12C7:  GOTO   2D5
+12C8:  BCF    03,5
+12C9:  BCF    03,6
+12CA:  MOVLW  26
+12CB:  BSF    03,5
+12CC:  BSF    03,6
+12CD:  SUBWF  1F,W
+12CE:  BTFSC  03,2
+12CF:  GOTO   2D3
+12D0:  BCF    03,5
+12D1:  BCF    03,6
+12D2:  GOTO   61A
+12D3:  BCF    03,5
+12D4:  BCF    03,6
+....................         {                           // Copy string const from ROM to RAM 
+....................             strcpy(temps, "hrs="); 
+*
+008F:  BCF    0A,0
+0090:  BCF    0A,1
+0091:  BCF    0A,2
+0092:  ADDWF  02,F
+0093:  RETLW  68
+0094:  RETLW  72
+0095:  RETLW  73
+0096:  RETLW  3D
+0097:  RETLW  00
+*
+12D5:  BSF    03,5
+12D6:  BSF    03,6
+12D7:  CLRF   26
+12D8:  BCF    03,5
+12D9:  BCF    03,6
+12DA:  MOVLW  A1
+12DB:  MOVWF  04
+12DC:  BSF    03,7
+12DD:  BSF    03,5
+12DE:  BSF    03,6
+12DF:  MOVF   26,W
+12E0:  ADDWF  04,F
+12E1:  MOVF   26,W
+12E2:  BCF    03,5
+12E3:  BCF    03,6
+12E4:  BCF    0A,4
+12E5:  CALL   08F
+12E6:  BSF    0A,4
+12E7:  MOVWF  00
+12E8:  IORLW  00
+12E9:  BTFSC  03,2
+12EA:  GOTO   2F1
+12EB:  BSF    03,5
+12EC:  BSF    03,6
+12ED:  INCF   26,F
+12EE:  BCF    03,5
+12EF:  BCF    03,6
+12F0:  GOTO   2DA
+....................             if (match_str(temps))   // ..before matching it 
+12F1:  MOVLW  01
+12F2:  BSF    03,5
+12F3:  BSF    03,6
+12F4:  MOVWF  27
+12F5:  MOVLW  A1
+12F6:  MOVWF  26
+12F7:  BCF    03,5
+12F8:  BCF    03,6
+12F9:  BCF    0A,4
+12FA:  BSF    0A,3
+12FB:  CALL   2EA
+12FC:  BSF    0A,4
+12FD:  BCF    0A,3
+12FE:  MOVF   78,F
+12FF:  BTFSC  03,2
+1300:  GOTO   3AD
+....................             { 
+....................                                     // ..and updating clock value 
+....................                 update |= get_hexbyte(rtc.b[2]); 
+1301:  MOVLW  00
+1302:  BSF    03,5
+1303:  BSF    03,6
+1304:  BTFSC  1E,0
+1305:  MOVLW  01
+1306:  MOVWF  26
+*
+1398:  BSF    03,5
+1399:  BSF    03,6
+139A:  MOVF   26,W
+139B:  BCF    03,5
+139C:  BCF    03,6
+139D:  IORWF  78,W
+139E:  IORLW  00
+139F:  BTFSS  03,2
+13A0:  GOTO   3A7
+13A1:  BSF    03,5
+13A2:  BSF    03,6
+13A3:  BCF    1E,0
+13A4:  BCF    03,5
+13A5:  BCF    03,6
+13A6:  GOTO   3AC
+13A7:  BSF    03,5
+13A8:  BSF    03,6
+13A9:  BSF    1E,0
+13AA:  BCF    03,5
+13AB:  BCF    03,6
+....................                 continue; 
+13AC:  GOTO   2B2
+....................             } 
+....................             strcpy(temps, "min=");  // RTC minutes? 
+*
+0098:  BCF    0A,0
+0099:  BCF    0A,1
+009A:  BCF    0A,2
+009B:  ADDWF  02,F
+009C:  RETLW  6D
+009D:  RETLW  69
+009E:  RETLW  6E
+009F:  RETLW  3D
+00A0:  RETLW  00
+*
+13AD:  BSF    03,5
+13AE:  BSF    03,6
+13AF:  CLRF   26
+13B0:  BCF    03,5
+13B1:  BCF    03,6
+13B2:  MOVLW  A1
+13B3:  MOVWF  04
+13B4:  BSF    03,7
+13B5:  BSF    03,5
+13B6:  BSF    03,6
+13B7:  MOVF   26,W
+13B8:  ADDWF  04,F
+13B9:  MOVF   26,W
+13BA:  BCF    03,5
+13BB:  BCF    03,6
+13BC:  BCF    0A,4
+13BD:  CALL   098
+13BE:  BSF    0A,4
+13BF:  MOVWF  00
+13C0:  IORLW  00
+13C1:  BTFSC  03,2
+13C2:  GOTO   3C9
+13C3:  BSF    03,5
+13C4:  BSF    03,6
+13C5:  INCF   26,F
+13C6:  BCF    03,5
+13C7:  BCF    03,6
+13C8:  GOTO   3B2
+....................             if (match_str(temps)) 
+13C9:  MOVLW  01
+13CA:  BSF    03,5
+13CB:  BSF    03,6
+13CC:  MOVWF  27
+13CD:  MOVLW  A1
+13CE:  MOVWF  26
+13CF:  BCF    03,5
+13D0:  BCF    03,6
+13D1:  BCF    0A,4
+13D2:  BSF    0A,3
+13D3:  CALL   2EA
+13D4:  BSF    0A,4
+13D5:  BCF    0A,3
+13D6:  MOVF   78,F
+13D7:  BTFSC  03,2
+13D8:  GOTO   485
+....................             { 
+....................                 update |= get_hexbyte(rtc.b[1]); 
+13D9:  MOVLW  00
+13DA:  BSF    03,5
+13DB:  BSF    03,6
+13DC:  BTFSC  1E,0
+13DD:  MOVLW  01
+13DE:  MOVWF  26
+*
+1470:  BSF    03,5
+1471:  BSF    03,6
+1472:  MOVF   26,W
+1473:  BCF    03,5
+1474:  BCF    03,6
+1475:  IORWF  78,W
+1476:  IORLW  00
+1477:  BTFSS  03,2
+1478:  GOTO   47F
+1479:  BSF    03,5
+147A:  BSF    03,6
+147B:  BCF    1E,0
+147C:  BCF    03,5
+147D:  BCF    03,6
+147E:  GOTO   484
+147F:  BSF    03,5
+1480:  BSF    03,6
+1481:  BSF    1E,0
+1482:  BCF    03,5
+1483:  BCF    03,6
+....................                 continue; 
+1484:  GOTO   2B2
+....................             } 
+....................             strcpy(temps, "sec=");  // RTC secs? 
+*
+00A1:  BCF    0A,0
+00A2:  BCF    0A,1
+00A3:  BCF    0A,2
+00A4:  ADDWF  02,F
+00A5:  RETLW  73
+00A6:  RETLW  65
+00A7:  RETLW  63
+00A8:  RETLW  3D
+00A9:  RETLW  00
+*
+1485:  BSF    03,5
+1486:  BSF    03,6
+1487:  CLRF   26
+1488:  BCF    03,5
+1489:  BCF    03,6
+148A:  MOVLW  A1
+148B:  MOVWF  04
+148C:  BSF    03,7
+148D:  BSF    03,5
+148E:  BSF    03,6
+148F:  MOVF   26,W
+1490:  ADDWF  04,F
+1491:  MOVF   26,W
+1492:  BCF    03,5
+1493:  BCF    03,6
+1494:  BCF    0A,4
+1495:  CALL   0A1
+1496:  BSF    0A,4
+1497:  MOVWF  00
+1498:  IORLW  00
+1499:  BTFSC  03,2
+149A:  GOTO   4A1
+149B:  BSF    03,5
+149C:  BSF    03,6
+149D:  INCF   26,F
+149E:  BCF    03,5
+149F:  BCF    03,6
+14A0:  GOTO   48A
+....................             if (match_str(temps)) 
+14A1:  MOVLW  01
+14A2:  BSF    03,5
+14A3:  BSF    03,6
+14A4:  MOVWF  27
+14A5:  MOVLW  A1
+14A6:  MOVWF  26
+14A7:  BCF    03,5
+14A8:  BCF    03,6
+14A9:  BCF    0A,4
+14AA:  BSF    0A,3
+14AB:  CALL   2EA
+14AC:  BSF    0A,4
+14AD:  BCF    0A,3
+14AE:  MOVF   78,F
+14AF:  BTFSC  03,2
+14B0:  GOTO   55D
+....................             { 
+....................                 update |= get_hexbyte(rtc.b[0]); 
+14B1:  MOVLW  00
+14B2:  BSF    03,5
+14B3:  BSF    03,6
+14B4:  BTFSC  1E,0
+14B5:  MOVLW  01
+14B6:  MOVWF  26
+*
+1548:  BSF    03,5
+1549:  BSF    03,6
+154A:  MOVF   26,W
+154B:  BCF    03,5
+154C:  BCF    03,6
+154D:  IORWF  78,W
+154E:  IORLW  00
+154F:  BTFSS  03,2
+1550:  GOTO   557
+1551:  BSF    03,5
+1552:  BSF    03,6
+1553:  BCF    1E,0
+1554:  BCF    03,5
+1555:  BCF    03,6
+1556:  GOTO   55C
+1557:  BSF    03,5
+1558:  BSF    03,6
+1559:  BSF    1E,0
+155A:  BCF    03,5
+155B:  BCF    03,6
+....................                 continue; 
+155C:  GOTO   2B2
+....................             }                       // O/P port bit change? 
+....................             strcpy(temps, "out"); 
+*
+00AA:  BCF    0A,0
+00AB:  BCF    0A,1
+00AC:  BCF    0A,2
+00AD:  ADDWF  02,F
+00AE:  RETLW  6F
+00AF:  RETLW  75
+00B0:  RETLW  74
+00B1:  RETLW  00
+*
+155D:  BSF    03,5
+155E:  BSF    03,6
+155F:  CLRF   26
+1560:  BCF    03,5
+1561:  BCF    03,6
+1562:  MOVLW  A1
+1563:  MOVWF  04
+1564:  BSF    03,7
+1565:  BSF    03,5
+1566:  BSF    03,6
+1567:  MOVF   26,W
+1568:  ADDWF  04,F
+1569:  MOVF   26,W
+156A:  BCF    03,5
+156B:  BCF    03,6
+156C:  BCF    0A,4
+156D:  CALL   0AA
+156E:  BSF    0A,4
+156F:  MOVWF  00
+1570:  IORLW  00
+1571:  BTFSC  03,2
+1572:  GOTO   579
+1573:  BSF    03,5
+1574:  BSF    03,6
+1575:  INCF   26,F
+1576:  BCF    03,5
+1577:  BCF    03,6
+1578:  GOTO   562
+....................             if (match_str(temps) && get_byte(c) && isdigit(c) && 
+....................                 match_byte('=') && get_byte(d) && isdigit(d)) 
+1579:  MOVLW  01
+157A:  BSF    03,5
+157B:  BSF    03,6
+157C:  MOVWF  27
+157D:  MOVLW  A1
+157E:  MOVWF  26
+157F:  BCF    03,5
+1580:  BCF    03,6
+1581:  BCF    0A,4
+1582:  BSF    0A,3
+1583:  CALL   2EA
+1584:  BSF    0A,4
+1585:  BCF    0A,3
+1586:  MOVF   78,F
+1587:  BTFSC  03,2
+1588:  GOTO   61A
+*
+1598:  MOVF   78,F
+1599:  BTFSC  03,2
+159A:  GOTO   61A
+159B:  MOVLW  30
+159C:  BSF    03,5
+159D:  BSF    03,6
+159E:  SUBWF  1F,W
+159F:  BTFSC  03,0
+15A0:  GOTO   5A4
+15A1:  BCF    03,5
+15A2:  BCF    03,6
+15A3:  GOTO   61A
+15A4:  BCF    03,5
+15A5:  BCF    03,6
+15A6:  MOVLW  3A
+15A7:  BSF    03,5
+15A8:  BSF    03,6
+15A9:  SUBWF  1F,W
+15AA:  BTFSS  03,0
+15AB:  GOTO   5AF
+15AC:  BCF    03,5
+15AD:  BCF    03,6
+15AE:  GOTO   61A
+15AF:  BCF    03,5
+15B0:  BCF    03,6
+15B1:  MOVLW  3D
+15B2:  BSF    03,5
+15B3:  BSF    03,6
+15B4:  MOVWF  2B
+15B5:  BCF    03,5
+15B6:  BCF    03,6
+15B7:  BCF    0A,4
+15B8:  BSF    0A,3
+15B9:  CALL   095
+15BA:  BSF    0A,4
+15BB:  BCF    0A,3
+15BC:  MOVF   78,F
+15BD:  BTFSC  03,2
+15BE:  GOTO   61A
+*
+15CE:  MOVF   78,F
+15CF:  BTFSC  03,2
+15D0:  GOTO   61A
+15D1:  MOVLW  30
+15D2:  BSF    03,5
+15D3:  BSF    03,6
+15D4:  SUBWF  20,W
+15D5:  BTFSC  03,0
+15D6:  GOTO   5DA
+15D7:  BCF    03,5
+15D8:  BCF    03,6
+15D9:  GOTO   61A
+15DA:  BCF    03,5
+15DB:  BCF    03,6
+15DC:  MOVLW  3A
+15DD:  BSF    03,5
+15DE:  BSF    03,6
+15DF:  SUBWF  20,W
+15E0:  BTFSS  03,0
+15E1:  GOTO   5E5
+15E2:  BCF    03,5
+15E3:  BCF    03,6
+15E4:  GOTO   61A
+15E5:  BCF    03,5
+15E6:  BCF    03,6
+....................             { 
+....................                 if (d == '0')       // If off, switch bit on 
+15E7:  MOVLW  30
+15E8:  BSF    03,5
+15E9:  BSF    03,6
+15EA:  SUBWF  20,W
+15EB:  BTFSC  03,2
+15EC:  GOTO   5F0
+15ED:  BCF    03,5
+15EE:  BCF    03,6
+15EF:  GOTO   605
+15F0:  BCF    03,5
+15F1:  BCF    03,6
+....................                     portval |= 1 << (c-'0'); 
+15F2:  MOVLW  30
+15F3:  BSF    03,5
+15F4:  BSF    03,6
+15F5:  SUBWF  1F,W
+15F6:  BCF    03,5
+15F7:  BCF    03,6
+15F8:  MOVWF  78
+15F9:  MOVLW  01
+15FA:  MOVWF  77
+15FB:  MOVF   78,F
+15FC:  BTFSC  03,2
+15FD:  GOTO   602
+15FE:  BCF    03,0
+15FF:  RLF    77,F
+1600:  DECFSZ 78,F
+1601:  GOTO   5FE
+1602:  MOVF   77,W
+1603:  IORWF  48,F
+....................                 else                // If on, switch bit off 
+1604:  GOTO   618
+....................                     portval &= ~(1 << (c-'0'));   
+1605:  MOVLW  30
+1606:  BSF    03,5
+1607:  BSF    03,6
+1608:  SUBWF  1F,W
+1609:  BCF    03,5
+160A:  BCF    03,6
+160B:  MOVWF  78
+160C:  MOVLW  01
+160D:  MOVWF  77
+160E:  MOVF   78,F
+160F:  BTFSC  03,2
+1610:  GOTO   615
+1611:  BCF    03,0
+1612:  RLF    77,F
+1613:  DECFSZ 78,F
+1614:  GOTO   611
+1615:  MOVF   77,W
+1616:  XORLW  FF
+1617:  ANDWF  48,F
+.................... #if PORTBINV                     
+....................                 d = ~portval;       // Update hardware port 
+....................                 PORTB = d;                                  
+.................... #else 
+....................                 PORTB = portval; 
+1618:  MOVF   48,W
+1619:  MOVWF  06
+.................... #endif                                 
+....................             } 
+....................         } 
+....................     } 
+161A:  GOTO   2B2
+....................     if (update)                     // Update clock chip if time changed 
+161B:  BSF    03,5
+161C:  BSF    03,6
+161D:  BTFSC  1E,0
+161E:  GOTO   622
+161F:  BCF    03,5
+1620:  BCF    03,6
+1621:  GOTO   67B
+1622:  BCF    03,5
+1623:  BCF    03,6
+....................         set_rtc_time(); 
+.................... } 
+....................  
+.................... /* Tx poll: send next SLIP character if possible, adding escape sequences */ 
+.................... #separate 
+.................... void tx_poll(void) 
+.................... { 
+....................     static BOOL escflag=0; 
+....................     BYTE b; 
+....................  
+....................     if (txflag && TX_READY)             // If something to transmit 
+*
+0441:  BTFSS  4B,1
+0442:  GOTO   6CA
+0443:  BSF    03,5
+0444:  BTFSC  18,1
+0445:  GOTO   448
+0446:  BCF    03,5
+0447:  GOTO   6CA
+0448:  BCF    03,5
+....................     { 
+.................... #if TXDROP 
+....................         if (txout==0 && txin>4)         // Check if dropping frames for test 
+....................         { 
+....................             dropcount++; 
+....................             if ((dropcount % TXDROP) == 0) 
+....................             { 
+....................                 txflag = 0; 
+....................                 txin = txout = 0; 
+....................             } 
+....................         } 
+.................... #endif 
+....................         if (txout == txin)              // If all RAM headers sent.. 
+0449:  MOVF   4C,W
+044A:  SUBWF  4D,W
+044B:  BTFSS  03,2
+044C:  GOTO   4E0
+....................         { 
+....................             if (txi2c)                  // ..and ROM file to be sent.. 
+044D:  MOVF   4E,W
+044E:  IORWF  4F,W
+044F:  BTFSC  03,2
+0450:  GOTO   4D6
+....................             { 
+....................                 open_file();            // ..open it for O/P 
+....................                 txout++; 
+*
+04D4:  INCF   4D,F
+....................             } 
+....................             else                        // All sent: terminate SLIP frame 
+04D5:  GOTO   4DF
+....................             { 
+....................                 putchar(SLIP_END); 
+04D6:  MOVLW  C0
+04D7:  CLRWDT
+04D8:  BTFSS  0C,4
+04D9:  GOTO   4D7
+04DA:  MOVWF  19
+....................                 txin = txout = 0; 
+04DB:  CLRF   4D
+04DC:  MOVF   4D,W
+04DD:  MOVWF  4C
+....................                 txflag = 0; 
+04DE:  BCF    4B,1
+....................             } 
+....................         } 
+....................         else if (txout > txin)          // If sending ROM file 
+04DF:  GOTO   6CA
+04E0:  MOVF   4D,W
+04E1:  SUBWF  4C,W
+04E2:  BTFSC  03,0
+04E3:  GOTO   672
+....................         { 
+....................                                         // ..and all sent.. 
+....................             if (txi2c && !tx_file_byte()) 
+04E4:  MOVF   4E,W
+04E5:  IORWF  4F,W
+04E6:  BTFSC  03,2
+04E7:  GOTO   671
+*
+064C:  MOVF   78,F
+064D:  BTFSS  03,2
+064E:  GOTO   671
+....................             {                           // ..terminate frame, close file 
+....................                 putchar(SLIP_END); 
+064F:  MOVLW  C0
+0650:  CLRWDT
+0651:  BTFSS  0C,4
+0652:  GOTO   650
+0653:  MOVWF  19
+....................                 close_file(); 
+....................                 txin = txout = 0; 
+*
+0665:  CLRF   4D
+0666:  MOVF   4D,W
+0667:  MOVWF  4C
+....................                 txflag = txi2c = 0; 
+0668:  CLRF   4F
+0669:  CLRF   4E
+066A:  MOVF   4E,W
+066B:  IORWF  4F,W
+066C:  BTFSS  03,2
+066D:  GOTO   670
+066E:  BCF    4B,1
+066F:  GOTO   671
+0670:  BSF    4B,1
+....................             } 
+....................         } 
+....................         else                            // If sending RAM header.. 
+0671:  GOTO   6CA
+....................         { 
+....................             b = read_txbuff(txout);     // ..encode next byte and send it 
+*
+0680:  MOVF   78,W
+0681:  BSF    03,5
+0682:  BSF    03,6
+0683:  MOVWF  10
+....................             if (escflag) 
+0684:  BCF    03,5
+0685:  BCF    03,6
+0686:  BTFSS  75,0
+0687:  GOTO   6A3
+....................             {                           // Escape char sent, now send value 
+....................                 putchar(b==SLIP_END ? ESC_END : ESC_ESC); 
+0688:  MOVLW  C0
+0689:  BSF    03,5
+068A:  BSF    03,6
+068B:  SUBWF  10,W
+068C:  BTFSC  03,2
+068D:  GOTO   691
+068E:  BCF    03,5
+068F:  BCF    03,6
+0690:  GOTO   695
+0691:  BCF    03,5
+0692:  BCF    03,6
+0693:  MOVLW  DC
+0694:  GOTO   696
+0695:  MOVLW  DD
+0696:  BSF    03,5
+0697:  BSF    03,6
+0698:  MOVWF  11
+0699:  MOVF   11,W
+069A:  BCF    03,5
+069B:  BCF    03,6
+069C:  CLRWDT
+069D:  BTFSS  0C,4
+069E:  GOTO   69C
+069F:  MOVWF  19
+....................                 txout++; 
+06A0:  INCF   4D,F
+....................                 escflag = 0; 
+06A1:  BCF    75,0
+....................             }                           // Escape char required 
+....................             else if (b==SLIP_END || b==SLIP_ESC) 
+06A2:  GOTO   6CA
+06A3:  MOVLW  C0
+06A4:  BSF    03,5
+06A5:  BSF    03,6
+06A6:  SUBWF  10,W
+06A7:  BTFSS  03,2
+06A8:  GOTO   6AC
+06A9:  BCF    03,5
+06AA:  BCF    03,6
+06AB:  GOTO   6B9
+06AC:  BCF    03,5
+06AD:  BCF    03,6
+06AE:  MOVLW  DB
+06AF:  BSF    03,5
+06B0:  BSF    03,6
+06B1:  SUBWF  10,W
+06B2:  BTFSC  03,2
+06B3:  GOTO   6B7
+06B4:  BCF    03,5
+06B5:  BCF    03,6
+06B6:  GOTO   6C0
+06B7:  BCF    03,5
+06B8:  BCF    03,6
+....................             { 
+....................                 putchar(SLIP_ESC); 
+06B9:  MOVLW  DB
+06BA:  CLRWDT
+06BB:  BTFSS  0C,4
+06BC:  GOTO   6BA
+06BD:  MOVWF  19
+....................                 escflag = 1; 
+06BE:  BSF    75,0
+....................             } 
+....................             else                        // Send byte unmodified 
+06BF:  GOTO   6CA
+....................             { 
+....................                 putchar(b); 
+06C0:  BSF    03,5
+06C1:  BSF    03,6
+06C2:  MOVF   10,W
+06C3:  BCF    03,5
+06C4:  BCF    03,6
+06C5:  CLRWDT
+06C6:  BTFSS  0C,4
+06C7:  GOTO   6C5
+06C8:  MOVWF  19
+....................                 txout++; 
+06C9:  INCF   4D,F
+....................             } 
+....................         } 
+....................     } 
+06CA:  BSF    0A,3
+06CB:  BCF    0A,4
+06CC:  GOTO   433
+.................... } 
+....................  
+.................... /* Rx poll: check for modem command, send response */ 
+.................... void rx_poll(void) 
+.................... { 
+....................     if (modemflag && !txflag) 
+*
+0800:  BTFSS  4B,3
+0801:  GOTO   026
+0802:  BTFSC  4B,1
+0803:  GOTO   026
+....................     { 
+....................         strcpy(txbuff, "OK\r\n");       // Send OK in response to modem cmd 
+*
+00B2:  BCF    0A,0
+00B3:  BCF    0A,1
+00B4:  BCF    0A,2
+00B5:  ADDWF  02,F
+00B6:  RETLW  4F
+00B7:  RETLW  4B
+00B8:  RETLW  0D
+00B9:  RETLW  0A
+00BA:  RETLW  00
+*
+0804:  BSF    03,5
+0805:  BSF    03,6
+0806:  CLRF   10
+0807:  BCF    03,5
+0808:  BCF    03,6
+0809:  MOVLW  10
+080A:  MOVWF  04
+080B:  BSF    03,7
+080C:  BSF    03,5
+080D:  BSF    03,6
+080E:  MOVF   10,W
+080F:  ADDWF  04,F
+0810:  MOVF   10,W
+0811:  BCF    03,5
+0812:  BCF    03,6
+0813:  BCF    0A,3
+0814:  CALL   0B2
+0815:  BSF    0A,3
+0816:  MOVWF  00
+0817:  IORLW  00
+0818:  BTFSC  03,2
+0819:  GOTO   020
+081A:  BSF    03,5
+081B:  BSF    03,6
+081C:  INCF   10,F
+081D:  BCF    03,5
+081E:  BCF    03,6
+081F:  GOTO   009
+....................         txin = 4; 
+0820:  MOVLW  04
+0821:  MOVWF  4C
+....................         txout = 0; 
+0822:  CLRF   4D
+....................         txflag = 1; 
+0823:  BSF    4B,1
+....................         modemflag = 0; 
+0824:  BCF    4B,3
+....................     }                                   // Diagnostic; send index if '?' 
+....................     else if (rxbuff[0] == '?' && !txflag) 
+0825:  GOTO   043
+0826:  MOVLW  3F
+0827:  BSF    03,5
+0828:  SUBWF  20,W
+0829:  BTFSC  03,2
+082A:  GOTO   02D
+082B:  BCF    03,5
+082C:  GOTO   043
+082D:  BCF    03,5
+082E:  BTFSC  4B,1
+082F:  GOTO   043
+....................     { 
+....................         rxbuff[0] = rxin = 0; 
+0830:  CLRF   50
+0831:  MOVF   50,W
+0832:  BSF    03,5
+0833:  MOVWF  20
+....................         romdir.f.name[0] = 0; 
+0834:  BCF    03,5
+0835:  CLRF   63
+....................         find_file(); 
+0836:  BCF    0A,3
+0837:  CALL   6CD
+0838:  BSF    0A,3
+....................         txflag = txi2c = 1; 
+0839:  CLRF   4F
+083A:  MOVLW  01
+083B:  MOVWF  4E
+083C:  MOVF   4E,W
+083D:  IORWF  4F,W
+083E:  BTFSS  03,2
+083F:  GOTO   042
+0840:  BCF    4B,1
+0841:  GOTO   043
+0842:  BSF    4B,1
+....................     } 
+0843:  BSF    0A,3
+0844:  BCF    0A,4
+0845:  GOTO   435
+.................... } 
+....................  
+.................... /* Get current time from Real-Time Clock */ 
+.................... void get_rtc_time(void) 
+.................... { 
+....................     int i; 
+....................  
+....................     i2c_start(); 
+*
+0293:  BSF    03,5
+0294:  BSF    07,4
+0295:  CLRWDT
+0296:  BSF    07,3
+0297:  CLRWDT
+0298:  BCF    03,5
+0299:  BCF    07,4
+029A:  BSF    03,5
+029B:  BCF    07,4
+029C:  CLRWDT
+029D:  BCF    03,5
+029E:  BCF    07,3
+029F:  BSF    03,5
+02A0:  BCF    07,3
+....................     i2c_write(RTC_ADDR);                // i2c address for write cycle 
+02A1:  MOVLW  A2
+02A2:  BSF    03,6
+02A3:  MOVWF  2D
+02A4:  BCF    03,5
+02A5:  BCF    03,6
+02A6:  CALL   214
+....................     i2c_write(2);                       // RTC register offset 
+02A7:  MOVLW  02
+02A8:  BSF    03,5
+02A9:  BSF    03,6
+02AA:  MOVWF  2D
+02AB:  BCF    03,5
+02AC:  BCF    03,6
+02AD:  CALL   214
+....................     i2c_start(); 
+02AE:  BSF    03,5
+02AF:  BSF    07,4
+02B0:  CLRWDT
+02B1:  BSF    07,3
+02B2:  CLRWDT
+02B3:  BCF    03,5
+02B4:  BCF    07,4
+02B5:  BSF    03,5
+02B6:  BCF    07,4
+02B7:  CLRWDT
+02B8:  BCF    03,5
+02B9:  BCF    07,3
+02BA:  BSF    03,5
+02BB:  BCF    07,3
+....................     i2c_write(RTC_ADDR | 1);            // i2c address for read cycle 
+02BC:  MOVLW  A3
+02BD:  BSF    03,6
+02BE:  MOVWF  2D
+02BF:  BCF    03,5
+02C0:  BCF    03,6
+02C1:  CALL   214
+....................     for (i=0; i<sizeof(rtc); i++)       // Read bytes 
+02C2:  BSF    03,5
+02C3:  BSF    03,6
+02C4:  CLRF   1E
+02C5:  BCF    03,5
+02C6:  BCF    03,6
+02C7:  MOVLW  03
+02C8:  BSF    03,5
+02C9:  BSF    03,6
+02CA:  SUBWF  1E,W
+02CB:  BTFSS  03,0
+02CC:  GOTO   2D0
+02CD:  BCF    03,5
+02CE:  BCF    03,6
+02CF:  GOTO   2F8
+02D0:  BCF    03,5
+02D1:  BCF    03,6
+....................         rtc.b[i] = i2c_read(i<sizeof(rtc)-1); 
+02D2:  MOVLW  70
+02D3:  BSF    03,5
+02D4:  BSF    03,6
+02D5:  ADDWF  1E,W
+02D6:  BCF    03,5
+02D7:  BCF    03,6
+02D8:  MOVWF  04
+02D9:  BCF    03,7
+02DA:  MOVLW  02
+02DB:  BSF    03,5
+02DC:  BSF    03,6
+02DD:  SUBWF  1E,W
+02DE:  BTFSC  03,0
+02DF:  GOTO   2E3
+02E0:  BCF    03,5
+02E1:  BCF    03,6
+02E2:  GOTO   2E7
+02E3:  BCF    03,5
+02E4:  BCF    03,6
+02E5:  MOVLW  00
+02E6:  GOTO   2E8
+02E7:  MOVLW  01
+02E8:  BSF    03,5
+02E9:  BSF    03,6
+02EA:  MOVWF  21
+02EB:  MOVF   21,W
+02EC:  BCF    03,5
+02ED:  BCF    03,6
+02EE:  MOVWF  77
+02EF:  CALL   24E
+02F0:  MOVF   78,W
+02F1:  MOVWF  00
+02F2:  BSF    03,5
+02F3:  BSF    03,6
+02F4:  INCF   1E,F
+02F5:  BCF    03,5
+02F6:  BCF    03,6
+02F7:  GOTO   2C7
+....................     i2c_stop(); 
+02F8:  BSF    03,5
+02F9:  BCF    07,4
+02FA:  NOP
+02FB:  BSF    07,3
+02FC:  BCF    03,5
+02FD:  BTFSS  07,3
+02FE:  GOTO   2FD
+02FF:  CLRWDT
+0300:  NOP
+0301:  NOP
+0302:  NOP
+0303:  BSF    03,5
+0304:  BSF    07,4
+0305:  CLRWDT
+0306:  BCF    03,5
+0307:  RETLW  00
+.................... } 
+....................  
+.................... /* Set current time in Real-Time Clock */ 
+.................... void set_rtc_time(void) 
+.................... { 
+....................     int i; 
+....................  
+....................     i2c_start(); 
+*
+1624:  BSF    03,5
+1625:  BSF    07,4
+1626:  CLRWDT
+1627:  BSF    07,3
+1628:  CLRWDT
+1629:  BCF    03,5
+162A:  BCF    07,4
+162B:  BSF    03,5
+162C:  BCF    07,4
+162D:  CLRWDT
+162E:  BCF    03,5
+162F:  BCF    07,3
+1630:  BSF    03,5
+1631:  BCF    07,3
+....................     i2c_write(RTC_ADDR);                // i2c address for write cycle 
+1632:  MOVLW  A2
+1633:  BSF    03,6
+1634:  MOVWF  2D
+1635:  BCF    03,5
+1636:  BCF    03,6
+1637:  BCF    0A,4
+1638:  CALL   214
+1639:  BSF    0A,4
+....................     i2c_write(2);                       // RTC register offset 
+163A:  MOVLW  02
+163B:  BSF    03,5
+163C:  BSF    03,6
+163D:  MOVWF  2D
+163E:  BCF    03,5
+163F:  BCF    03,6
+1640:  BCF    0A,4
+1641:  CALL   214
+1642:  BSF    0A,4
+....................     for (i=0; i<sizeof(rtc); i++)       // Write bytes 
+1643:  BSF    03,5
+1644:  BSF    03,6
+1645:  CLRF   26
+1646:  BCF    03,5
+1647:  BCF    03,6
+1648:  MOVLW  03
+1649:  BSF    03,5
+164A:  BSF    03,6
+164B:  SUBWF  26,W
+164C:  BTFSS  03,0
+164D:  GOTO   651
+164E:  BCF    03,5
+164F:  BCF    03,6
+1650:  GOTO   66C
+1651:  BCF    03,5
+1652:  BCF    03,6
+....................         i2c_write(rtc.b[i]); 
+1653:  MOVLW  70
+1654:  BSF    03,5
+1655:  BSF    03,6
+1656:  ADDWF  26,W
+1657:  BCF    03,5
+1658:  BCF    03,6
+1659:  MOVWF  04
+165A:  BCF    03,7
+165B:  MOVF   00,W
+165C:  BSF    03,5
+165D:  BSF    03,6
+165E:  MOVWF  27
+165F:  MOVF   27,W
+1660:  MOVWF  2D
+1661:  BCF    03,5
+1662:  BCF    03,6
+1663:  BCF    0A,4
+1664:  CALL   214
+1665:  BSF    0A,4
+1666:  BSF    03,5
+1667:  BSF    03,6
+1668:  INCF   26,F
+1669:  BCF    03,5
+166A:  BCF    03,6
+166B:  GOTO   648
+....................     i2c_stop(); 
+166C:  BSF    03,5
+166D:  BCF    07,4
+166E:  NOP
+166F:  BSF    07,3
+1670:  BCF    03,5
+1671:  BTFSS  07,3
+1672:  GOTO   671
+1673:  CLRWDT
+1674:  NOP
+1675:  NOP
+1676:  NOP
+1677:  BSF    03,5
+1678:  BSF    07,4
+1679:  CLRWDT
+167A:  BCF    03,5
+.................... } 
+....................  
+.................... /* Get current temperature from i2c or sensor */ 
+.................... void get_temperature(void) 
+.................... { 
+....................     i2c_start(); 
+*
+0457:  BSF    03,5
+0458:  BSF    07,4
+0459:  CLRWDT
+045A:  BSF    07,3
+045B:  CLRWDT
+045C:  BCF    03,5
+045D:  BCF    07,4
+045E:  BSF    03,5
+045F:  BCF    07,4
+0460:  CLRWDT
+0461:  BCF    03,5
+0462:  BCF    07,3
+0463:  BSF    03,5
+0464:  BCF    07,3
+....................     i2c_write(SENSOR_ADDR | 1); 
+0465:  MOVLW  9F
+0466:  BSF    03,6
+0467:  MOVWF  2D
+0468:  BCF    03,5
+0469:  BCF    03,6
+046A:  CALL   214
+....................     temphi = i2c_read(1); 
+046B:  MOVLW  01
+046C:  MOVWF  77
+046D:  CALL   24E
+046E:  MOVF   78,W
+046F:  MOVWF  74
+....................     templo = i2c_read(0); 
+0470:  CLRF   77
+0471:  CALL   24E
+0472:  MOVF   78,W
+0473:  MOVWF  73
+....................     i2c_stop(); 
+0474:  BSF    03,5
+0475:  BCF    07,4
+0476:  NOP
+0477:  BSF    07,3
+0478:  BCF    03,5
+0479:  BTFSS  07,3
+047A:  GOTO   479
+047B:  CLRWDT
+047C:  NOP
+047D:  NOP
+047E:  NOP
+047F:  BSF    03,5
+0480:  BSF    07,4
+0481:  CLRWDT
+0482:  BCF    03,5
+.................... } 
+....................  
+.................... /* Find a filename in ROM filesystem. Return false if not found 
+.................... ** Sets fileidx to 0 if ROM error, 1 if file is first in ROM, 2 if 2nd.. 
+.................... ** and leaves directory info in 'romdir' 
+.................... ** If the first byte of name is zero, match first directory entry */ 
+.................... #separate 
+.................... BOOL find_file(void) 
+.................... { 
+....................     BOOL mismatch=1, end=0; 
+....................     int i; 
+....................     BYTE b; 
+*
+06CD:  BSF    03,5
+06CE:  BSF    03,6
+06CF:  BSF    1E,0
+06D0:  BCF    1E,1
+....................     char temps[ROM_FNAMELEN]; 
+....................  
+....................     fileidx = 0;                        // Set ROM address pointer to 0 
+06D1:  BCF    03,5
+06D2:  BCF    03,6
+06D3:  CLRF   6F
+....................     i2c_start(); 
+06D4:  BSF    03,5
+06D5:  BSF    07,4
+06D6:  CLRWDT
+06D7:  BSF    07,3
+06D8:  CLRWDT
+06D9:  BCF    03,5
+06DA:  BCF    07,4
+06DB:  BSF    03,5
+06DC:  BCF    07,4
+06DD:  CLRWDT
+06DE:  BCF    03,5
+06DF:  BCF    07,3
+06E0:  BSF    03,5
+06E1:  BCF    07,3
+....................     i2c_write(EEROM_ADDR); 
+06E2:  MOVLW  A0
+06E3:  BSF    03,6
+06E4:  MOVWF  2D
+06E5:  BCF    03,5
+06E6:  BCF    03,6
+06E7:  CALL   214
+....................     i2c_write(0); 
+06E8:  BSF    03,5
+06E9:  BSF    03,6
+06EA:  CLRF   2D
+06EB:  BCF    03,5
+06EC:  BCF    03,6
+06ED:  CALL   214
+....................     i2c_write(0); 
+06EE:  BSF    03,5
+06EF:  BSF    03,6
+06F0:  CLRF   2D
+06F1:  BCF    03,5
+06F2:  BCF    03,6
+06F3:  CALL   214
+....................     i2c_stop(); 
+06F4:  BSF    03,5
+06F5:  BCF    07,4
+06F6:  NOP
+06F7:  BSF    07,3
+06F8:  BCF    03,5
+06F9:  BTFSS  07,3
+06FA:  GOTO   6F9
+06FB:  CLRWDT
+06FC:  NOP
+06FD:  NOP
+06FE:  NOP
+06FF:  BSF    03,5
+0700:  BSF    07,4
+0701:  CLRWDT
+0702:  BCF    03,5
+....................     do 
+....................     { 
+....................         i2c_start();                    // Read next directory entry 
+0703:  BSF    03,5
+0704:  BSF    07,4
+0705:  CLRWDT
+0706:  BSF    07,3
+0707:  CLRWDT
+0708:  BCF    03,5
+0709:  BCF    07,4
+070A:  BSF    03,5
+070B:  BCF    07,4
+070C:  CLRWDT
+070D:  BCF    03,5
+070E:  BCF    07,3
+070F:  BSF    03,5
+0710:  BCF    07,3
+....................         i2c_write(EEROM_ADDR | 1); 
+0711:  MOVLW  A1
+0712:  BSF    03,6
+0713:  MOVWF  2D
+0714:  BCF    03,5
+0715:  BCF    03,6
+0716:  CALL   214
+....................         if ((romdir.b[0] = i2c_read(1)) == 0xff) 
+0717:  MOVLW  01
+0718:  MOVWF  77
+0719:  CALL   24E
+071A:  MOVF   78,W
+071B:  MOVWF  5C
+071C:  INCF   5C,W
+071D:  BTFSS  03,2
+071E:  GOTO   727
+....................         {                               // Abandon if no entry 
+....................             end = 1; 
+071F:  BSF    03,5
+0720:  BSF    03,6
+0721:  BSF    1E,1
+....................             i2c_read(0); 
+0722:  BCF    03,5
+0723:  BCF    03,6
+0724:  CLRF   77
+0725:  CALL   24E
+....................         } 
+....................         else 
+0726:  GOTO   7AF
+....................         {                               // Get file len, ptr, csum and flags 
+....................             for (i=1; i<7; i++) 
+0727:  MOVLW  01
+0728:  BSF    03,5
+0729:  BSF    03,6
+072A:  MOVWF  1F
+072B:  BCF    03,5
+072C:  BCF    03,6
+072D:  MOVLW  07
+072E:  BSF    03,5
+072F:  BSF    03,6
+0730:  SUBWF  1F,W
+0731:  BTFSS  03,0
+0732:  GOTO   736
+0733:  BCF    03,5
+0734:  BCF    03,6
+0735:  GOTO   74B
+0736:  BCF    03,5
+0737:  BCF    03,6
+....................                 romdir.b[i] = i2c_read(1); 
+0738:  MOVLW  5C
+0739:  BSF    03,5
+073A:  BSF    03,6
+073B:  ADDWF  1F,W
+073C:  BCF    03,5
+073D:  BCF    03,6
+073E:  MOVWF  04
+073F:  BCF    03,7
+0740:  MOVLW  01
+0741:  MOVWF  77
+0742:  CALL   24E
+0743:  MOVF   78,W
+0744:  MOVWF  00
+0745:  BSF    03,5
+0746:  BSF    03,6
+0747:  INCF   1F,F
+0748:  BCF    03,5
+0749:  BCF    03,6
+074A:  GOTO   72D
+....................             mismatch = 0;               // Try matching name 
+074B:  BSF    03,5
+074C:  BSF    03,6
+074D:  BCF    1E,0
+....................             for (i=0; i<ROM_FNAMELEN; i++) 
+074E:  CLRF   1F
+074F:  BCF    03,5
+0750:  BCF    03,6
+0751:  MOVLW  0C
+0752:  BSF    03,5
+0753:  BSF    03,6
+0754:  SUBWF  1F,W
+0755:  BTFSS  03,0
+0756:  GOTO   75A
+0757:  BCF    03,5
+0758:  BCF    03,6
+0759:  GOTO   7A7
+075A:  BCF    03,5
+075B:  BCF    03,6
+....................             { 
+....................                 temps[i] = b = i2c_read(i<ROM_FNAMELEN-1); 
+075C:  MOVLW  A1
+075D:  BSF    03,5
+075E:  BSF    03,6
+075F:  ADDWF  1F,W
+0760:  BCF    03,5
+0761:  BCF    03,6
+0762:  MOVWF  79
+0763:  MOVLW  01
+0764:  MOVWF  7A
+0765:  MOVF   79,W
+0766:  BTFSC  03,0
+0767:  INCF   7A,F
+0768:  MOVWF  04
+0769:  BCF    03,7
+076A:  BTFSC  7A,0
+076B:  BSF    03,7
+076C:  MOVLW  0B
+076D:  BSF    03,5
+076E:  BSF    03,6
+076F:  SUBWF  1F,W
+0770:  BTFSC  03,0
+0771:  GOTO   775
+0772:  BCF    03,5
+0773:  BCF    03,6
+0774:  GOTO   779
+0775:  BCF    03,5
+0776:  BCF    03,6
+0777:  MOVLW  00
+0778:  GOTO   77A
+0779:  MOVLW  01
+077A:  BSF    03,5
+077B:  BSF    03,6
+077C:  MOVWF  2F
+077D:  MOVF   2F,W
+077E:  BCF    03,5
+077F:  BCF    03,6
+0780:  MOVWF  77
+0781:  CALL   24E
+0782:  MOVF   78,W
+0783:  BSF    03,5
+0784:  BSF    03,6
+0785:  MOVWF  20
+0786:  MOVF   20,W
+0787:  MOVWF  00
+....................                 if (b != romdir.f.name[i]) 
+0788:  MOVLW  07
+0789:  ADDWF  1F,W
+078A:  BCF    03,5
+078B:  BCF    03,6
+078C:  MOVWF  77
+078D:  MOVLW  5C
+078E:  ADDWF  77,W
+078F:  MOVWF  04
+0790:  BCF    03,7
+0791:  MOVF   00,W
+0792:  BSF    03,5
+0793:  BSF    03,6
+0794:  SUBWF  20,W
+0795:  BTFSS  03,2
+0796:  GOTO   79A
+0797:  BCF    03,5
+0798:  BCF    03,6
+0799:  GOTO   7A1
+079A:  BCF    03,5
+079B:  BCF    03,6
+....................                     mismatch = 1; 
+079C:  BSF    03,5
+079D:  BSF    03,6
+079E:  BSF    1E,0
+079F:  BCF    03,5
+07A0:  BCF    03,6
+....................             } 
+07A1:  BSF    03,5
+07A2:  BSF    03,6
+07A3:  INCF   1F,F
+07A4:  BCF    03,5
+07A5:  BCF    03,6
+07A6:  GOTO   751
+....................             if (!romdir.f.name[0])      // If null name, match anything 
+07A7:  MOVF   63,F
+07A8:  BTFSS  03,2
+07A9:  GOTO   7AF
+....................                 mismatch = 0; 
+07AA:  BSF    03,5
+07AB:  BSF    03,6
+07AC:  BCF    1E,0
+07AD:  BCF    03,5
+07AE:  BCF    03,6
+....................         } 
+....................         i2c_stop();                     // Loop until matched 
+07AF:  BSF    03,5
+07B0:  BCF    07,4
+07B1:  NOP
+07B2:  BSF    07,3
+07B3:  BCF    03,5
+07B4:  BTFSS  07,3
+07B5:  GOTO   7B4
+07B6:  CLRWDT
+07B7:  NOP
+07B8:  NOP
+07B9:  NOP
+07BA:  BSF    03,5
+07BB:  BSF    07,4
+07BC:  CLRWDT
+07BD:  BCF    03,5
+....................     } while (!end && fileidx++<MAXFILES && mismatch); 
+07BE:  BSF    03,5
+07BF:  BSF    03,6
+07C0:  BTFSS  1E,1
+07C1:  GOTO   7C5
+07C2:  BCF    03,5
+07C3:  BCF    03,6
+07C4:  GOTO   7D7
+07C5:  BCF    03,5
+07C6:  BCF    03,6
+07C7:  MOVF   6F,W
+07C8:  INCF   6F,F
+07C9:  MOVWF  77
+07CA:  MOVLW  64
+07CB:  SUBWF  77,W
+07CC:  BTFSC  03,0
+07CD:  GOTO   7D7
+07CE:  BSF    03,5
+07CF:  BSF    03,6
+07D0:  BTFSS  1E,0
+07D1:  GOTO   7D5
+07D2:  BCF    03,5
+07D3:  BCF    03,6
+07D4:  GOTO   703
+07D5:  BCF    03,5
+07D6:  BCF    03,6
+....................     if (mismatch) 
+07D7:  BSF    03,5
+07D8:  BSF    03,6
+07D9:  BTFSC  1E,0
+07DA:  GOTO   7DE
+07DB:  BCF    03,5
+07DC:  BCF    03,6
+07DD:  GOTO   7E2
+07DE:  BCF    03,5
+07DF:  BCF    03,6
+....................         romdir.f.len = 0; 
+07E0:  CLRF   5D
+07E1:  CLRF   5C
+....................     return(!mismatch); 
+07E2:  MOVLW  00
+07E3:  BSF    03,5
+07E4:  BSF    03,6
+07E5:  BTFSS  1E,0
+07E6:  MOVLW  01
+07E7:  BCF    03,5
+07E8:  BCF    03,6
+07E9:  MOVWF  78
+07EA:  RETLW  00
+.................... } 
+....................  
+.................... /* Open the previously-found file for transmission */ 
+.................... BOOL open_file(void) 
+.................... { 
+....................     if (romdir.f.flags & EGI_ATVARS)    // If EGI '@' substitution 
+*
+0451:  MOVF   62,W
+0452:  ANDLW  01
+0453:  IORLW  00
+0454:  BTFSC  03,2
+0455:  GOTO   483
+....................     { 
+....................         get_rtc_time();                 // ..get time and temperature 
+0456:  CALL   293
+....................         get_temperature(); 
+....................     } 
+....................     if (romdir.f.flags & EGI_HASHVARS)  // If EGI boolean '#' substitution 
+*
+0483:  MOVF   62,W
+0484:  ANDLW  02
+0485:  IORLW  00
+0486:  BTFSC  03,2
+0487:  GOTO   48E
+....................     { 
+....................         hashmask = barmask = 0x80;      // ..reset mask values 
+0488:  MOVLW  80
+0489:  MOVWF  4A
+048A:  MOVF   4A,W
+048B:  MOVWF  49
+.................... #if PORTBINV         
+....................         portval = ~PORTB;               // ..and fetch port value 
+.................... #else 
+....................         portval = PORTB; 
+048C:  MOVF   06,W
+048D:  MOVWF  48
+.................... #endif                 
+....................     } 
+....................     i2c_start(); 
+048E:  BSF    03,5
+048F:  BSF    07,4
+0490:  CLRWDT
+0491:  BSF    07,3
+0492:  CLRWDT
+0493:  BCF    03,5
+0494:  BCF    07,4
+0495:  BSF    03,5
+0496:  BCF    07,4
+0497:  CLRWDT
+0498:  BCF    03,5
+0499:  BCF    07,3
+049A:  BSF    03,5
+049B:  BCF    07,3
+....................     i2c_write(EEROM_ADDR);              // Write start pointer to eerom 
+049C:  MOVLW  A0
+049D:  BSF    03,6
+049E:  MOVWF  2D
+049F:  BCF    03,5
+04A0:  BCF    03,6
+04A1:  CALL   214
+....................     i2c_write(romdir.f.start >> 8); 
+04A2:  MOVF   5F,W
+04A3:  BSF    03,5
+04A4:  BSF    03,6
+04A5:  MOVWF  11
+04A6:  CLRF   12
+04A7:  MOVF   11,W
+04A8:  MOVWF  2D
+04A9:  BCF    03,5
+04AA:  BCF    03,6
+04AB:  CALL   214
+....................     i2c_write(romdir.f.start); 
+04AC:  MOVF   5E,W
+04AD:  BSF    03,5
+04AE:  BSF    03,6
+04AF:  MOVWF  2D
+04B0:  BCF    03,5
+04B1:  BCF    03,6
+04B2:  CALL   214
+....................     i2c_stop(); 
+04B3:  BSF    03,5
+04B4:  BCF    07,4
+04B5:  NOP
+04B6:  BSF    07,3
+04B7:  BCF    03,5
+04B8:  BTFSS  07,3
+04B9:  GOTO   4B8
+04BA:  CLRWDT
+04BB:  NOP
+04BC:  NOP
+04BD:  NOP
+04BE:  BSF    03,5
+04BF:  BSF    07,4
+04C0:  CLRWDT
+....................     i2c_start(); 
+04C1:  BSF    07,4
+04C2:  CLRWDT
+04C3:  BSF    07,3
+04C4:  CLRWDT
+04C5:  BCF    03,5
+04C6:  BCF    07,4
+04C7:  BSF    03,5
+04C8:  BCF    07,4
+04C9:  CLRWDT
+04CA:  BCF    03,5
+04CB:  BCF    07,3
+04CC:  BSF    03,5
+04CD:  BCF    07,3
+....................     i2c_write(EEROM_ADDR | 1);          // Restart ROM access as read cycle 
+04CE:  MOVLW  A1
+04CF:  BSF    03,6
+04D0:  MOVWF  2D
+04D1:  BCF    03,5
+04D2:  BCF    03,6
+04D3:  CALL   214
+.................... } 
+....................  
+.................... /* Close the previously-opened file */ 
+.................... void close_file(void) 
+.................... { 
+....................     i2c_read(0);                        // Dummy read cycle without ACK 
+*
+0654:  CLRF   77
+0655:  CALL   24E
+....................     i2c_stop(); 
+0656:  BSF    03,5
+0657:  BCF    07,4
+0658:  NOP
+0659:  BSF    07,3
+065A:  BCF    03,5
+065B:  BTFSS  07,3
+065C:  GOTO   65B
+065D:  CLRWDT
+065E:  NOP
+065F:  NOP
+0660:  NOP
+0661:  BSF    03,5
+0662:  BSF    07,4
+0663:  CLRWDT
+0664:  BCF    03,5
+.................... } 
+....................  
+.................... /* Transmit a byte from the current i2c file to the SLIP link 
+.................... ** Return 0 when complete file is sent 
+.................... ** If file has EGI flag set, perform run-time variable substitution */ 
+.................... BOOL tx_file_byte(void) 
+.................... { 
+....................     int ret=0, idx; 
+*
+04E8:  BSF    03,5
+04E9:  BSF    03,6
+04EA:  CLRF   11
+....................     BYTE b; 
+....................  
+....................     if (romdir.f.len)                   // Check if any bytes left to send 
+04EB:  BCF    03,5
+04EC:  BCF    03,6
+04ED:  MOVF   5C,W
+04EE:  IORWF  5D,W
+04EF:  BTFSC  03,2
+04F0:  GOTO   646
+....................     { 
+....................         b = i2c_read(1);                // Get next byte from ROM 
+04F1:  MOVLW  01
+04F2:  MOVWF  77
+04F3:  CALL   24E
+04F4:  MOVF   78,W
+04F5:  BSF    03,5
+04F6:  BSF    03,6
+04F7:  MOVWF  13
+....................         if ((romdir.f.flags&EGI_ATVARS) && b=='@') 
+04F8:  BCF    03,5
+04F9:  BCF    03,6
+04FA:  MOVF   62,W
+04FB:  ANDLW  01
+04FC:  IORLW  00
+04FD:  BTFSC  03,2
+04FE:  GOTO   5E9
+04FF:  MOVLW  40
+0500:  BSF    03,5
+0501:  BSF    03,6
+0502:  SUBWF  13,W
+0503:  BTFSC  03,2
+0504:  GOTO   508
+0505:  BCF    03,5
+0506:  BCF    03,6
+0507:  GOTO   5E9
+0508:  BCF    03,5
+0509:  BCF    03,6
+....................         {                               // If EGI var substitution.. 
+....................             b = i2c_read(1);            // ..get 2nd byte 
+050A:  MOVLW  01
+050B:  MOVWF  77
+050C:  CALL   24E
+050D:  MOVF   78,W
+050E:  BSF    03,5
+050F:  BSF    03,6
+0510:  MOVWF  13
+....................             romdir.f.len--; 
+0511:  BCF    03,5
+0512:  BCF    03,6
+0513:  MOVF   5C,W
+0514:  BTFSC  03,2
+0515:  DECF   5D,F
+0516:  DECF   5C,F
+....................             inv_byte = b > '@';         // Get variable index 
+0517:  MOVLW  41
+0518:  BSF    03,5
+0519:  BSF    03,6
+051A:  SUBWF  13,W
+051B:  BTFSS  03,0
+051C:  GOTO   520
+051D:  BCF    03,5
+051E:  BCF    03,6
+051F:  GOTO   524
+0520:  BCF    03,5
+0521:  BCF    03,6
+0522:  BCF    4B,0
+0523:  GOTO   525
+0524:  BSF    4B,0
+....................             idx = inv_byte ? 0x50-b : b-0x30; 
+0525:  BTFSS  4B,0
+0526:  GOTO   530
+0527:  MOVLW  50
+0528:  MOVWF  77
+0529:  BSF    03,5
+052A:  BSF    03,6
+052B:  MOVF   13,W
+052C:  BCF    03,5
+052D:  BCF    03,6
+052E:  SUBWF  77,W
+052F:  GOTO   536
+0530:  MOVLW  30
+0531:  BSF    03,5
+0532:  BSF    03,6
+0533:  SUBWF  13,W
+0534:  BCF    03,5
+0535:  BCF    03,6
+0536:  BSF    03,5
+0537:  BSF    03,6
+0538:  MOVWF  12
+....................             if (idx>=0 && idx<=2)       // Index 0-2 are secs, mins, hrs 
+0539:  MOVLW  03
+053A:  SUBWF  12,W
+053B:  BTFSS  03,0
+053C:  GOTO   540
+053D:  BCF    03,5
+053E:  BCF    03,6
+053F:  GOTO   556
+0540:  BCF    03,5
+0541:  BCF    03,6
+....................                 printf(tx_byte_inv, "%02X", rtc.b[idx]); 
+*
+035F:  BSF    03,5
+0360:  BSF    03,6
+0361:  BTFSS  16,7
+0362:  GOTO   366
+0363:  BCF    03,5
+0364:  BCF    03,6
+0365:  GOTO   384
+0366:  MOVLW  0F
+0367:  BCF    03,5
+0368:  BCF    03,6
+0369:  MOVWF  77
+036A:  BSF    03,5
+036B:  BSF    03,6
+036C:  SWAPF  15,W
+036D:  BCF    03,5
+036E:  BCF    03,6
+036F:  ANDWF  77,F
+0370:  MOVLW  0A
+0371:  SUBWF  77,W
+0372:  BTFSC  03,0
+0373:  GOTO   377
+0374:  MOVLW  30
+0375:  ADDWF  77,F
+0376:  GOTO   37D
+0377:  BSF    03,5
+0378:  BSF    03,6
+0379:  MOVF   16,W
+037A:  BCF    03,5
+037B:  BCF    03,6
+037C:  ADDWF  77,F
+037D:  MOVF   77,W
+037E:  BSF    03,5
+037F:  BSF    03,6
+0380:  MOVWF  17
+0381:  BCF    03,5
+0382:  BCF    03,6
+0383:  CALL   346
+0384:  MOVLW  0F
+0385:  BSF    03,5
+0386:  BSF    03,6
+0387:  ANDWF  15,F
+0388:  MOVLW  0A
+0389:  SUBWF  15,W
+038A:  BTFSS  03,0
+038B:  GOTO   38F
+038C:  BCF    03,5
+038D:  BCF    03,6
+038E:  GOTO   393
+038F:  MOVLW  30
+0390:  BCF    03,5
+0391:  BCF    03,6
+0392:  GOTO   399
+0393:  BSF    03,5
+0394:  BSF    03,6
+0395:  BCF    16,7
+0396:  MOVF   16,W
+0397:  BCF    03,5
+0398:  BCF    03,6
+0399:  BSF    03,5
+039A:  BSF    03,6
+039B:  ADDWF  15,F
+039C:  MOVF   15,W
+039D:  MOVWF  17
+039E:  BCF    03,5
+039F:  BCF    03,6
+03A0:  CALL   346
+03A1:  BCF    0A,3
+03A2:  BCF    0A,4
+03A3:  GOTO   555
+*
+0542:  MOVLW  70
+0543:  BSF    03,5
+0544:  BSF    03,6
+0545:  ADDWF  12,W
+0546:  BCF    03,5
+0547:  BCF    03,6
+0548:  MOVWF  04
+0549:  BCF    03,7
+054A:  MOVF   00,W
+054B:  BSF    03,5
+054C:  BSF    03,6
+054D:  MOVWF  14
+054E:  MOVF   14,W
+054F:  MOVWF  15
+0550:  MOVLW  37
+0551:  MOVWF  16
+0552:  BCF    03,5
+0553:  BCF    03,6
+0554:  GOTO   35F
+....................             else if (idx == 3)          // Index 3 is temperature 
+0555:  GOTO   5E8
+0556:  MOVLW  03
+0557:  BSF    03,5
+0558:  BSF    03,6
+0559:  SUBWF  12,W
+055A:  BTFSC  03,2
+055B:  GOTO   55F
+055C:  BCF    03,5
+055D:  BCF    03,6
+055E:  GOTO   599
+055F:  BCF    03,5
+0560:  BCF    03,6
+....................             { 
+....................                 printf(tx_byte_inv, "%2u", temphi); 
+*
+03A4:  BSF    03,5
+03A5:  BSF    03,6
+03A6:  MOVF   17,W
+03A7:  BCF    03,5
+03A8:  BCF    03,6
+03A9:  CLRF   78
+03AA:  BSF    03,5
+03AB:  BSF    03,6
+03AC:  SUBWF  16,W
+03AD:  BTFSS  03,0
+03AE:  GOTO   3B2
+03AF:  BCF    03,5
+03B0:  BCF    03,6
+03B1:  GOTO   3B7
+03B2:  MOVF   16,W
+03B3:  BCF    03,5
+03B4:  BCF    03,6
+03B5:  MOVWF  77
+03B6:  GOTO   3D7
+03B7:  CLRF   77
+03B8:  MOVLW  08
+03B9:  BSF    03,5
+03BA:  BSF    03,6
+03BB:  MOVWF  18
+03BC:  BCF    03,5
+03BD:  BCF    03,6
+03BE:  BSF    03,5
+03BF:  BSF    03,6
+03C0:  RLF    16,F
+03C1:  BCF    03,5
+03C2:  BCF    03,6
+03C3:  RLF    77,F
+03C4:  BSF    03,5
+03C5:  BSF    03,6
+03C6:  MOVF   17,W
+03C7:  BCF    03,5
+03C8:  BCF    03,6
+03C9:  SUBWF  77,W
+03CA:  BTFSC  03,0
+03CB:  MOVWF  77
+03CC:  RLF    78,F
+03CD:  BSF    03,5
+03CE:  BSF    03,6
+03CF:  DECFSZ 18,F
+03D0:  GOTO   3D2
+03D1:  GOTO   3D5
+03D2:  BCF    03,5
+03D3:  BCF    03,6
+03D4:  GOTO   3BE
+03D5:  BCF    03,5
+03D6:  BCF    03,6
+03D7:  RETLW  00
+03D8:  BSF    03,5
+03D9:  BSF    03,6
+03DA:  BTFSS  15,0
+03DB:  GOTO   3DF
+03DC:  BCF    03,5
+03DD:  BCF    03,6
+03DE:  GOTO   40F
+03DF:  BTFSS  15,1
+03E0:  GOTO   3E4
+03E1:  BCF    03,5
+03E2:  BCF    03,6
+03E3:  GOTO   435
+03E4:  MOVF   14,W
+03E5:  MOVWF  16
+03E6:  MOVLW  64
+03E7:  MOVWF  17
+03E8:  BCF    03,5
+03E9:  BCF    03,6
+03EA:  CALL   3A4
+03EB:  MOVF   77,W
+03EC:  BSF    03,5
+03ED:  BSF    03,6
+03EE:  MOVWF  14
+03EF:  BCF    03,5
+03F0:  BCF    03,6
+03F1:  MOVF   78,W
+03F2:  MOVLW  30
+03F3:  BTFSS  03,2
+03F4:  GOTO   401
+03F5:  BSF    03,5
+03F6:  BSF    03,6
+03F7:  BTFSS  15,2
+03F8:  GOTO   3FC
+03F9:  BCF    03,5
+03FA:  BCF    03,6
+03FB:  GOTO   40F
+03FC:  BTFSC  15,3
+03FD:  MOVLW  20
+03FE:  BCF    03,5
+03FF:  BCF    03,6
+0400:  GOTO   407
+0401:  BSF    03,5
+0402:  BSF    03,6
+0403:  BCF    15,2
+0404:  BCF    15,3
+0405:  BCF    03,5
+0406:  BCF    03,6
+0407:  ADDWF  78,F
+0408:  MOVF   78,W
+0409:  BSF    03,5
+040A:  BSF    03,6
+040B:  MOVWF  17
+040C:  BCF    03,5
+040D:  BCF    03,6
+040E:  CALL   346
+040F:  BSF    03,5
+0410:  BSF    03,6
+0411:  MOVF   14,W
+0412:  MOVWF  16
+0413:  MOVLW  0A
+0414:  MOVWF  17
+0415:  BCF    03,5
+0416:  BCF    03,6
+0417:  CALL   3A4
+0418:  MOVF   77,W
+0419:  BSF    03,5
+041A:  BSF    03,6
+041B:  MOVWF  14
+041C:  BCF    03,5
+041D:  BCF    03,6
+041E:  MOVF   78,W
+041F:  MOVLW  30
+0420:  BTFSS  03,2
+0421:  GOTO   42D
+0422:  BSF    03,5
+0423:  BSF    03,6
+0424:  BTFSS  15,2
+0425:  GOTO   429
+0426:  BCF    03,5
+0427:  BCF    03,6
+0428:  GOTO   435
+0429:  BTFSC  15,3
+042A:  MOVLW  20
+042B:  BCF    03,5
+042C:  BCF    03,6
+042D:  ADDWF  78,F
+042E:  MOVF   78,W
+042F:  BSF    03,5
+0430:  BSF    03,6
+0431:  MOVWF  17
+0432:  BCF    03,5
+0433:  BCF    03,6
+0434:  CALL   346
+0435:  MOVLW  30
+0436:  BSF    03,5
+0437:  BSF    03,6
+0438:  ADDWF  14,F
+0439:  MOVF   14,W
+043A:  MOVWF  17
+043B:  BCF    03,5
+043C:  BCF    03,6
+043D:  CALL   346
+043E:  BCF    0A,3
+043F:  BCF    0A,4
+0440:  GOTO   56A
+*
+0561:  MOVF   74,W
+0562:  BSF    03,5
+0563:  BSF    03,6
+0564:  MOVWF  14
+0565:  MOVLW  09
+0566:  MOVWF  15
+0567:  BCF    03,5
+0568:  BCF    03,6
+0569:  GOTO   3D8
+....................                 if (templo & 0x80) 
+056A:  MOVF   73,W
+056B:  ANDLW  80
+056C:  IORLW  00
+056D:  BTFSC  03,2
+056E:  GOTO   57E
+....................                     printf(tx_byte_inv, ".5"); 
+056F:  MOVLW  2E
+0570:  BSF    03,5
+0571:  BSF    03,6
+0572:  MOVWF  17
+0573:  BCF    03,5
+0574:  BCF    03,6
+0575:  CALL   346
+0576:  MOVLW  35
+0577:  BSF    03,5
+0578:  BSF    03,6
+0579:  MOVWF  17
+057A:  BCF    03,5
+057B:  BCF    03,6
+057C:  CALL   346
+....................                 else 
+057D:  GOTO   58C
+....................                     printf(tx_byte_inv, ".0"); 
+057E:  MOVLW  2E
+057F:  BSF    03,5
+0580:  BSF    03,6
+0581:  MOVWF  17
+0582:  BCF    03,5
+0583:  BCF    03,6
+0584:  CALL   346
+0585:  MOVLW  30
+0586:  BSF    03,5
+0587:  BSF    03,6
+0588:  MOVWF  17
+0589:  BCF    03,5
+058A:  BCF    03,6
+058B:  CALL   346
+....................                 i2c_read(1);            // Discard padding in ROM 
+058C:  MOVLW  01
+058D:  MOVWF  77
+058E:  CALL   24E
+....................                 i2c_read(1); 
+058F:  MOVLW  01
+0590:  MOVWF  77
+0591:  CALL   24E
+....................                 romdir.f.len -= 2; 
+0592:  MOVLW  02
+0593:  SUBWF  5C,F
+0594:  MOVLW  00
+0595:  BTFSS  03,0
+0596:  DECF   5D,F
+0597:  SUBWF  5D,F
+....................             } 
+....................             else if (b == '?')          // @? - read input port 
+0598:  GOTO   5E8
+0599:  MOVLW  3F
+059A:  BSF    03,5
+059B:  BSF    03,6
+059C:  SUBWF  13,W
+059D:  BTFSC  03,2
+059E:  GOTO   5A2
+059F:  BCF    03,5
+05A0:  BCF    03,6
+05A1:  GOTO   5BA
+05A2:  BCF    03,5
+05A3:  BCF    03,6
+....................             { 
+....................                 tx_byte('@'); 
+05A4:  MOVLW  40
+05A5:  BSF    03,5
+05A6:  BSF    03,6
+05A7:  MOVWF  19
+05A8:  BCF    03,5
+05A9:  BCF    03,6
+05AA:  CALL   308
+....................                 tx_byte(b); 
+05AB:  BSF    03,5
+05AC:  BSF    03,6
+05AD:  MOVF   13,W
+05AE:  MOVWF  19
+05AF:  BCF    03,5
+05B0:  BCF    03,6
+05B1:  CALL   308
+....................                 hashmask = barmask = 0x20; 
+05B2:  MOVLW  20
+05B3:  MOVWF  4A
+05B4:  MOVF   4A,W
+05B5:  MOVWF  49
+....................                 portval = ~PORTA; 
+05B6:  MOVF   05,W
+05B7:  MOVWF  48
+05B8:  COMF   48,F
+....................             } 
+....................             else if (b == '!')          // @! - read output port 
+05B9:  GOTO   5E8
+05BA:  MOVLW  21
+05BB:  BSF    03,5
+05BC:  BSF    03,6
+05BD:  SUBWF  13,W
+05BE:  BTFSC  03,2
+05BF:  GOTO   5C3
+05C0:  BCF    03,5
+05C1:  BCF    03,6
+05C2:  GOTO   5DA
+05C3:  BCF    03,5
+05C4:  BCF    03,6
+....................             { 
+....................                 tx_byte('@'); 
+05C5:  MOVLW  40
+05C6:  BSF    03,5
+05C7:  BSF    03,6
+05C8:  MOVWF  19
+05C9:  BCF    03,5
+05CA:  BCF    03,6
+05CB:  CALL   308
+....................                 tx_byte(b); 
+05CC:  BSF    03,5
+05CD:  BSF    03,6
+05CE:  MOVF   13,W
+05CF:  MOVWF  19
+05D0:  BCF    03,5
+05D1:  BCF    03,6
+05D2:  CALL   308
+....................                 hashmask = barmask = 0x80;       
+05D3:  MOVLW  80
+05D4:  MOVWF  4A
+05D5:  MOVF   4A,W
+05D6:  MOVWF  49
+.................... #if PORTBINV                 
+....................                 portval = ~PORTB; 
+.................... #else 
+....................                 portval = PORTB; 
+05D7:  MOVF   06,W
+05D8:  MOVWF  48
+.................... #endif   
+....................             } 
+....................             else                        // Unrecognised variable 
+05D9:  GOTO   5E8
+....................                 printf(tx_byte_inv, "??"); 
+05DA:  MOVLW  3F
+05DB:  BSF    03,5
+05DC:  BSF    03,6
+05DD:  MOVWF  17
+05DE:  BCF    03,5
+05DF:  BCF    03,6
+05E0:  CALL   346
+05E1:  MOVLW  3F
+05E2:  BSF    03,5
+05E3:  BSF    03,6
+05E4:  MOVWF  17
+05E5:  BCF    03,5
+05E6:  BCF    03,6
+05E7:  CALL   346
+....................         }                               // '#' and '|' are for boolean values 
+....................         else if (romdir.f.flags&EGI_HASHVARS && (b=='#' || b=='|')) 
+05E8:  GOTO   63C
+05E9:  MOVF   62,W
+05EA:  ANDLW  02
+05EB:  IORLW  00
+05EC:  BTFSC  03,2
+05ED:  GOTO   635
+05EE:  MOVLW  23
+05EF:  BSF    03,5
+05F0:  BSF    03,6
+05F1:  SUBWF  13,W
+05F2:  BTFSS  03,2
+05F3:  GOTO   5F7
+05F4:  BCF    03,5
+05F5:  BCF    03,6
+05F6:  GOTO   604
+05F7:  BCF    03,5
+05F8:  BCF    03,6
+05F9:  MOVLW  7C
+05FA:  BSF    03,5
+05FB:  BSF    03,6
+05FC:  SUBWF  13,W
+05FD:  BTFSC  03,2
+05FE:  GOTO   602
+05FF:  BCF    03,5
+0600:  BCF    03,6
+0601:  GOTO   635
+0602:  BCF    03,5
+0603:  BCF    03,6
+....................         { 
+....................             if (b=='#')                 // Replace '|' with '1' or '0' 
+0604:  MOVLW  23
+0605:  BSF    03,5
+0606:  BSF    03,6
+0607:  SUBWF  13,W
+0608:  BTFSC  03,2
+0609:  GOTO   60D
+060A:  BCF    03,5
+060B:  BCF    03,6
+060C:  GOTO   622
+060D:  BCF    03,5
+060E:  BCF    03,6
+....................             { 
+....................                 tx_byte(portval&hashmask ? '1' : '0'); 
+060F:  MOVF   48,W
+0610:  ANDWF  49,W
+0611:  IORLW  00
+0612:  BTFSC  03,2
+0613:  GOTO   616
+0614:  MOVLW  31
+0615:  GOTO   617
+0616:  MOVLW  30
+0617:  BSF    03,5
+0618:  BSF    03,6
+0619:  MOVWF  14
+061A:  MOVF   14,W
+061B:  MOVWF  19
+061C:  BCF    03,5
+061D:  BCF    03,6
+061E:  CALL   308
+....................                 hashmask >>= 1; 
+061F:  BCF    03,0
+0620:  RRF    49,F
+....................             } 
+....................             else                        // Replace '|' with inverse 
+0621:  GOTO   634
+....................             { 
+....................                 tx_byte(portval&barmask ? '|'+'#'-'1' : '|'+'#'-'0'); 
+0622:  MOVF   48,W
+0623:  ANDWF  4A,W
+0624:  IORLW  00
+0625:  BTFSC  03,2
+0626:  GOTO   629
+0627:  MOVLW  6E
+0628:  GOTO   62A
+0629:  MOVLW  6F
+062A:  BSF    03,5
+062B:  BSF    03,6
+062C:  MOVWF  14
+062D:  MOVF   14,W
+062E:  MOVWF  19
+062F:  BCF    03,5
+0630:  BCF    03,6
+0631:  CALL   308
+....................                 barmask >>= 1; 
+0632:  BCF    03,0
+0633:  RRF    4A,F
+....................             } 
+....................         } 
+....................         else                            // Non-EGI byte; send out unmodified 
+0634:  GOTO   63C
+....................             tx_byte(b); 
+0635:  BSF    03,5
+0636:  BSF    03,6
+0637:  MOVF   13,W
+0638:  MOVWF  19
+0639:  BCF    03,5
+063A:  BCF    03,6
+063B:  CALL   308
+....................         romdir.f.len--; 
+063C:  MOVF   5C,W
+063D:  BTFSC  03,2
+063E:  DECF   5D,F
+063F:  DECF   5C,F
+....................         ret = 1; 
+0640:  MOVLW  01
+0641:  BSF    03,5
+0642:  BSF    03,6
+0643:  MOVWF  11
+0644:  BCF    03,5
+0645:  BCF    03,6
+....................     } 
+....................     return(ret); 
+0646:  BSF    03,5
+0647:  BSF    03,6
+0648:  MOVF   11,W
+0649:  BCF    03,5
+064A:  BCF    03,6
+064B:  MOVWF  78
+.................... } 
+....................  
+.................... /* Transmit a SLIP byte or its 'inverse' i.e. 80h minus the value 
+.................... ** Use by EGI functions to ensure data and its inverse add up to 80h */ 
+.................... void tx_byte_inv(BYTE b) 
+.................... { 
+....................     tx_byte(inv_byte ? 0x80-b : b); 
+*
+0346:  BTFSS  4B,0
+0347:  GOTO   351
+0348:  MOVLW  80
+0349:  MOVWF  77
+034A:  BSF    03,5
+034B:  BSF    03,6
+034C:  MOVF   17,W
+034D:  BCF    03,5
+034E:  BCF    03,6
+034F:  SUBWF  77,W
+0350:  GOTO   356
+0351:  BSF    03,5
+0352:  BSF    03,6
+0353:  MOVF   17,W
+0354:  BCF    03,5
+0355:  BCF    03,6
+0356:  BSF    03,5
+0357:  BSF    03,6
+0358:  MOVWF  18
+0359:  MOVF   18,W
+035A:  MOVWF  19
+035B:  BCF    03,5
+035C:  BCF    03,6
+035D:  CALL   308
+035E:  RETLW  00
+.................... } 
+....................  
+.................... /* Update the current tick count, return non-zero if changed */ 
+.................... BOOL geticks(void) 
+.................... { 
+....................     static unsigned tc, lastc=0; 
+*
+0182:  BSF    03,5
+0183:  BSF    03,6
+0184:  BCF    10,0
+....................     BOOL changed=0; 
+....................  
+....................     tc = TIMER_1_HIGH; 
+0185:  BCF    03,5
+0186:  BCF    03,6
+0187:  MOVF   0F,W
+0188:  MOVWF  76
+....................     if (tc - lastc >= TIMER1_DIV) 
+0189:  MOVF   7C,W
+018A:  SUBWF  76,W
+018B:  MOVWF  77
+018C:  MOVLW  2D
+018D:  SUBWF  77,W
+018E:  BTFSS  03,0
+018F:  GOTO   198
+....................     { 
+....................         tickcount++; 
+0190:  INCF   5B,F
+....................         lastc += TIMER1_DIV; 
+0191:  MOVLW  2D
+0192:  ADDWF  7C,F
+....................         changed = 1; 
+0193:  BSF    03,5
+0194:  BSF    03,6
+0195:  BSF    10,0
+0196:  BCF    03,5
+0197:  BCF    03,6
+....................     } 
+....................     return(changed); 
+0198:  MOVLW  00
+0199:  BSF    03,5
+019A:  BSF    03,6
+019B:  BTFSC  10,0
+019C:  MOVLW  01
+019D:  BCF    03,5
+019E:  BCF    03,6
+019F:  MOVWF  78
+01A0:  RETLW  00
+.................... } 
+....................  
+.................... /* Check for timeout using the given tick counter */ 
+.................... BOOL timeout(int &var, int tout) 
+.................... { 
+*
+01BE:  BCF    12,0
+*
+01EA:  BCF    12,0
+*
+0BBF:  BCF    12,0
+*
+0BFB:  BCF    12,0
+....................     BOOL ret=0; 
+....................  
+....................     if (!tout || tickcount-var>=tout) 
+*
+01BF:  MOVF   11,F
+01C0:  BTFSS  03,2
+01C1:  GOTO   1C5
+01C2:  BCF    03,5
+01C3:  BCF    03,6
+01C4:  GOTO   1D8
+01C5:  BCF    03,5
+01C6:  BCF    03,6
+01C7:  MOVF   59,W
+01C8:  SUBWF  5B,W
+01C9:  BSF    03,5
+01CA:  BSF    03,6
+01CB:  SUBWF  11,W
+01CC:  BTFSS  03,2
+01CD:  GOTO   1D1
+01CE:  BCF    03,5
+01CF:  BCF    03,6
+01D0:  GOTO   1D8
+01D1:  BTFSS  03,0
+01D2:  GOTO   1D6
+01D3:  BCF    03,5
+01D4:  BCF    03,6
+01D5:  GOTO   1DF
+01D6:  BCF    03,5
+01D7:  BCF    03,6
+*
+01EB:  MOVF   11,F
+01EC:  BTFSS  03,2
+01ED:  GOTO   1F1
+01EE:  BCF    03,5
+01EF:  BCF    03,6
+01F0:  GOTO   204
+01F1:  BCF    03,5
+01F2:  BCF    03,6
+01F3:  MOVF   5A,W
+01F4:  SUBWF  5B,W
+01F5:  BSF    03,5
+01F6:  BSF    03,6
+01F7:  SUBWF  11,W
+01F8:  BTFSS  03,2
+01F9:  GOTO   1FD
+01FA:  BCF    03,5
+01FB:  BCF    03,6
+01FC:  GOTO   204
+01FD:  BTFSS  03,0
+01FE:  GOTO   202
+01FF:  BCF    03,5
+0200:  BCF    03,6
+0201:  GOTO   20B
+0202:  BCF    03,5
+0203:  BCF    03,6
+*
+0BC0:  MOVF   11,F
+0BC1:  BTFSS  03,2
+0BC2:  GOTO   3C6
+0BC3:  BCF    03,5
+0BC4:  BCF    03,6
+0BC5:  GOTO   3D9
+0BC6:  BCF    03,5
+0BC7:  BCF    03,6
+0BC8:  MOVF   5A,W
+0BC9:  SUBWF  5B,W
+0BCA:  BSF    03,5
+0BCB:  BSF    03,6
+0BCC:  SUBWF  11,W
+0BCD:  BTFSS  03,2
+0BCE:  GOTO   3D2
+0BCF:  BCF    03,5
+0BD0:  BCF    03,6
+0BD1:  GOTO   3D9
+0BD2:  BTFSS  03,0
+0BD3:  GOTO   3D7
+0BD4:  BCF    03,5
+0BD5:  BCF    03,6
+0BD6:  GOTO   3E0
+0BD7:  BCF    03,5
+0BD8:  BCF    03,6
+*
+0BFC:  MOVF   11,F
+0BFD:  BTFSS  03,2
+0BFE:  GOTO   402
+0BFF:  BCF    03,5
+0C00:  BCF    03,6
+0C01:  GOTO   415
+0C02:  BCF    03,5
+0C03:  BCF    03,6
+0C04:  MOVF   59,W
+0C05:  SUBWF  5B,W
+0C06:  BSF    03,5
+0C07:  BSF    03,6
+0C08:  SUBWF  11,W
+0C09:  BTFSS  03,2
+0C0A:  GOTO   40E
+0C0B:  BCF    03,5
+0C0C:  BCF    03,6
+0C0D:  GOTO   415
+0C0E:  BTFSS  03,0
+0C0F:  GOTO   413
+0C10:  BCF    03,5
+0C11:  BCF    03,6
+0C12:  GOTO   41C
+0C13:  BCF    03,5
+0C14:  BCF    03,6
+....................     { 
+....................         var = tickcount; 
+*
+01D8:  MOVF   5B,W
+01D9:  MOVWF  59
+*
+0204:  MOVF   5B,W
+0205:  MOVWF  5A
+*
+0BD9:  MOVF   5B,W
+0BDA:  MOVWF  5A
+*
+0C15:  MOVF   5B,W
+0C16:  MOVWF  59
+....................         ret = 1; 
+*
+01DA:  BSF    03,5
+01DB:  BSF    03,6
+01DC:  BSF    12,0
+01DD:  BCF    03,5
+01DE:  BCF    03,6
+*
+0206:  BSF    03,5
+0207:  BSF    03,6
+0208:  BSF    12,0
+0209:  BCF    03,5
+020A:  BCF    03,6
+*
+0BDB:  BSF    03,5
+0BDC:  BSF    03,6
+0BDD:  BSF    12,0
+0BDE:  BCF    03,5
+0BDF:  BCF    03,6
+*
+0C17:  BSF    03,5
+0C18:  BSF    03,6
+0C19:  BSF    12,0
+0C1A:  BCF    03,5
+0C1B:  BCF    03,6
+....................     } 
+....................     return(ret); 
+*
+01DF:  MOVLW  00
+01E0:  BSF    03,5
+01E1:  BSF    03,6
+01E2:  BTFSC  12,0
+01E3:  MOVLW  01
+01E4:  BCF    03,5
+01E5:  BCF    03,6
+01E6:  MOVWF  78
+*
+020B:  MOVLW  00
+020C:  BSF    03,5
+020D:  BSF    03,6
+020E:  BTFSC  12,0
+020F:  MOVLW  01
+0210:  BCF    03,5
+0211:  BCF    03,6
+0212:  MOVWF  78
+*
+0BE0:  MOVLW  00
+0BE1:  BSF    03,5
+0BE2:  BSF    03,6
+0BE3:  BTFSC  12,0
+0BE4:  MOVLW  01
+0BE5:  BCF    03,5
+0BE6:  BCF    03,6
+0BE7:  MOVWF  78
+*
+0C1C:  MOVLW  00
+0C1D:  BSF    03,5
+0C1E:  BSF    03,6
+0C1F:  BTFSC  12,0
+0C20:  MOVLW  01
+0C21:  BCF    03,5
+0C22:  BCF    03,6
+0C23:  MOVWF  78
+.................... } 
+....................  
+.................... /* Set the diagnostic LED on or off, refresh its timers */ 
+.................... void setled(BOOL on) 
+.................... { 
+....................     ledon = on; 
+*
+01A1:  BSF    03,5
+01A2:  BSF    03,6
+01A3:  MOVF   10,F
+01A4:  BTFSC  03,2
+01A5:  GOTO   1A9
+01A6:  BCF    03,5
+01A7:  BCF    03,6
+01A8:  GOTO   1AD
+01A9:  BCF    03,5
+01AA:  BCF    03,6
+01AB:  BCF    4B,7
+01AC:  GOTO   1AE
+01AD:  BSF    4B,7
+....................     output_bit(DIAG_LED, !on); 
+01AE:  BSF    03,5
+01AF:  BSF    03,6
+01B0:  MOVF   10,F
+01B1:  BTFSS  03,2
+01B2:  GOTO   1B6
+01B3:  BCF    03,5
+01B4:  BCF    03,6
+01B5:  GOTO   1BA
+01B6:  BCF    03,5
+01B7:  BCF    03,6
+01B8:  BCF    07,2
+01B9:  GOTO   1BB
+01BA:  BSF    07,2
+....................     timeout(ledonticks, 0); 
+01BB:  BSF    03,5
+01BC:  BSF    03,6
+01BD:  CLRF   11
+....................     timeout(ledoffticks, 0); 
+*
+01E7:  BSF    03,5
+01E8:  BSF    03,6
+01E9:  CLRF   11
+*
+0213:  RETLW  00
+.................... } 
+.................... /* EOF */ 

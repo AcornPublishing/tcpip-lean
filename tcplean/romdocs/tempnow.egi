@@ -1,0 +1,18 @@
+<html><meta http-equiv="refresh" content="3">
+<head><title>PICWEB - time and temperature now</title></head>
+<body><h3>PICWEB miniature Web server</h3>
+<h4>Ambient temperature now</h4>
+<table border=2>
+<tr><td><font FACE='Arial,Helvetica' SIZE=4>Temperature
+</font></td>
+<td><font FACE='Arial,Helvetica' SIZE=5>@3  <!--@M``-->&deg;C
+</font></td></tr>
+<tr><td><font FACE='Arial,Helvetica' SIZE=4>Time
+</font></td>
+<td><font FACE='Arial,Helvetica' SIZE=5>@2<!--@N-->:@1<!--@O-->:@0<!--@P-->
+</font></td></tr>
+</table>
+<br>
+<br><a href='status.egi'>Status page</a>
+<br><a href='index.htm'>Home page</a>
+</body></html>

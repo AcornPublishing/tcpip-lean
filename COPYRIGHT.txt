@@ -1,0 +1,23 @@
+TCP/IP Lean: Web Servers for Embedded Systems
+Second Edition
+
+By Jeremy Bentham
+
+CMP Books, CMP Media LLC
+Copyright 2002 by Jeremy Bentham
+ISBN 1-57820-108-X
+
+CMP Books
+CMP Media LLC
+1601 West 23rd Street, Suite 200
+Lawrence, Kansas 66046
+785-841-1631
+www.cmpbooks.com
+email: books@cmp.com
+
+The programs and applications on this disk have been carefully tested, but are 
+not guaranteed for any particular purpose. The publisher does not offer any 
+warranties and does not guarantee the accuracy, adequacy, or completeness of any 
+information and is not responsible for any errors or omissions or the results 
+obtained from use of such information.
+

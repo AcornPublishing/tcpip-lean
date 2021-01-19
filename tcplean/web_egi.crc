@@ -1,0 +1,27 @@
+Project WEB_EGI v0.06 archived 13-Aug-00 14:45
+
+egi_form.c   5A2E32B7 v0.02
+egi_slid.c   AA32C190 v0.02
+egi_swit.c   7D170749 v0.02
+ether3c.c    FA2ADE2E v0.06
+etherne.c    91C660C0 v0.25
+ip.c         1431F6E1 v0.12
+net.c        49FA2AD5 v0.10
+netutil.c    8B7C1154 v0.15
+pktd.c       53069452 v0.10
+serpc.c      A8547B33 v1.10
+tcp.c        34C696C1 v0.10
+web_egi.c    CA5969D2 v0.06
+
+egi_form.h   D3925A2B
+egi_slid.h   165628D1
+egi_swit.h   BD5C0DB7
+ether.h      78374607
+ip.h         7A74BD4D
+net.h        8B1221AB
+netutil.h    542554C8
+pktd.h       1004FCB4
+serpc.h      BCAE0C52
+tcp.h        482D9843
+web_egi.h    5524A287
+

@@ -1,0 +1,10 @@
+;
+; This dummy script file
+; to establish a slip connection with a host.
+;
+
+; Main entry point to script
+;
+proc main
+
+endproc
